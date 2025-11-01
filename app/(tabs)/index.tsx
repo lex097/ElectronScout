@@ -1,7 +1,7 @@
 // app/(tabs)/index.tsx - Match Scouting Screen
-import { useState, useEffect } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import {SafeAreaView} from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
 import { MatchData } from '../../types/match';
@@ -152,8 +152,7 @@ export default function MatchScoutScreen() {
               setNotes('');
               setCurrentPhaseIndex(0);
             }
-          },
-          { text: 'OK' }
+          }
         ]
       );
     } catch (error) {
