@@ -1,11 +1,12 @@
-import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
+import { Link, Tabs, router } from 'expo-router';
+import React, { useEffect } from 'react';
 import { Pressable } from 'react-native';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { useAuthStore } from '@/stores/authStore';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -17,6 +18,24 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const { user, isAuthenticated, isLoading, logout } = useAuthStore();
+
+  useEffect(() => {
+    if (!isLoading) {
+      if (!isAuthenticated || user?.role !== 'scouter') {
+        router.replace('/login');
+      }
+    }
+  }, [isAuthenticated, user, isLoading]);
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
+  if (isLoading || !isAuthenticated || user?.role !== 'scouter') {
+    return null; // Will redirect to login
+  }
 
   return (
     <Tabs
@@ -31,6 +50,21 @@ export default function TabLayout() {
         options={{
           title: 'Match Scouting',
           tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          headerLeft: () => (
+            <Pressable
+              onPress={handleLogout}
+              style={({ pressed }) => ({
+                marginLeft: 15,
+                opacity: pressed ? 0.5 : 1,
+              })}
+            >
+              <FontAwesome
+                name="sign-out"
+                size={22}
+                color={Colors[colorScheme ?? 'light'].text}
+              />
+            </Pressable>
+          ),
           headerRight: () => (
             <Link href="/modal" asChild>
               <Pressable>
@@ -52,6 +86,21 @@ export default function TabLayout() {
         options={{
           title: 'Analytics',
           tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          headerLeft: () => (
+            <Pressable
+              onPress={handleLogout}
+              style={({ pressed }) => ({
+                marginLeft: 15,
+                opacity: pressed ? 0.5 : 1,
+              })}
+            >
+              <FontAwesome
+                name="sign-out"
+                size={22}
+                color={Colors[colorScheme ?? 'light'].text}
+              />
+            </Pressable>
+          ),
         }}
       />
     </Tabs>
