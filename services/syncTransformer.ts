@@ -27,6 +27,14 @@ export class SyncTransformer {
 
     // Calculate points
     const calculatedPoints = calculateMatchPoints(metrics);
+    
+    // Debug logging
+    // console.log('Transform Debug:', {
+    //   matchId: sqliteMatch.id,
+    //   metricsType: typeof sqliteMatch.metrics,
+    //   parsedMetrics: metrics,
+    //   calculatedPoints: calculatedPoints
+    // });
 
     return {
       id: sqliteMatch.id,

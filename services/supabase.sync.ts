@@ -197,21 +197,29 @@ export class SupabaseSyncService {
         return false;
       }
 
+      const insertData = {
+        id: match.id,
+        team_id: teamId,
+        event_id: match.event_id || null,
+        match_number: match.match_number,
+        team_number: match.team_number,
+        scout_name: scoutName,
+        game_year: match.game_year,
+        metrics: match.metrics,
+        calculated_points: match.calculated_points,
+        notes: match.notes,
+        timestamp: match.timestamp,
+      };
+      
+      // console.log('Inserting to Supabase:', {
+      //   id: insertData.id,
+      //   calculated_points: insertData.calculated_points,
+      //   calculated_points_type: typeof insertData.calculated_points
+      // });
+
       const { error } = await this.getSupabaseClient()
         .from('matches')
-        .insert({
-          id: match.id,
-          team_id: teamId,
-          event_id: match.event_id || null,
-          match_number: match.match_number,
-          team_number: match.team_number,
-          scout_name: scoutName,
-          game_year: match.game_year,
-          metrics: match.metrics,
-          calculated_points: match.calculated_points,
-          notes: match.notes,
-          timestamp: match.timestamp,
-        });
+        .insert(insertData);
 
       if (error) {
         console.error('Insert error:', error);
@@ -259,29 +267,43 @@ export class SupabaseSyncService {
 
       for (let i = 0; i < matches.length; i += batchSize) {
         const batch = matches.slice(i, i + batchSize);
+        
+        const insertData = batch.map(m => ({
+          id: m.id,
+          team_id: teamId,
+          event_id: m.event_id || null,
+          match_number: m.match_number,
+          team_number: m.team_number,
+          scout_name: m.scout_name || scoutName,
+          game_year: m.game_year,
+          metrics: m.metrics,
+          calculated_points: m.calculated_points,
+          notes: m.notes,
+          timestamp: m.timestamp,
+        }));
+        
+      // console.log('Batch inserting to Supabase:', 
+      //   insertData.map(d => ({ 
+      //     id: d.id, 
+      //     calculated_points: d.calculated_points,
+      //     type: typeof d.calculated_points
+      //   }))
+      // );
+      
+      // Log the full first item to see everything being sent
+      // console.log('Full insert data (first item):', JSON.stringify(insertData[0], null, 2));
 
-        const { error } = await this.getSupabaseClient()
-          .from('matches')
-          .insert(
-            batch.map(m => ({
-              id: m.id,
-              team_id: teamId,
-              event_id: m.event_id || null,
-              match_number: m.match_number,
-              team_number: m.team_number,
-              scout_name: m.scout_name || scoutName,
-              game_year: m.game_year,
-              metrics: m.metrics,
-              calculated_points: m.calculated_points,
-              notes: m.notes,
-              timestamp: m.timestamp,
-            }))
-          );
+      const { data, error } = await this.getSupabaseClient()
+        .from('matches')
+        .insert(insertData)
+        .select('id, calculated_points');
 
         if (error) {
           console.error('Batch insert error:', error);
           failedCount += batch.length;
         } else {
+          // console.log('Supabase returned:', data);
+          // console.log('Inserted calculated_points:', data?.map(d => ({ id: d.id, calculated_points: d.calculated_points })));
           successCount += batch.length;
         }
       }
@@ -350,6 +372,59 @@ export class SupabaseSyncService {
       return data || [];
     } catch (error) {
       console.error('Fetch failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all matches for the current team from Supabase
+   * Returns matches in MatchData format for analytics
+   */
+  async getAllTeamMatches(): Promise<Array<{
+    id: string;
+    matchNumber: number;
+    teamNumber: number;
+    scouterId: string;
+    gameYear: number;
+    metrics: Record<string, any>;
+    timestamp: number;
+    synced: boolean;
+    notes?: string;
+  }>> {
+    try {
+      const teamId = await this.getTeamId();
+      if (!teamId) {
+        console.log('No team context for fetching team matches');
+        return [];
+      }
+      
+      const { data, error } = await this.getSupabaseClient()
+        .from('matches')
+        .select('*')
+        .eq('team_id', teamId)
+        .order('timestamp', { ascending: false });
+      
+      if (error) {
+        console.error('Failed to fetch team matches:', error);
+        return [];
+      }
+      
+      if (!data) return [];
+      
+      // Transform Supabase format to MatchData format
+      return data.map(match => ({
+        id: match.id,
+        matchNumber: match.match_number,
+        teamNumber: match.team_number,
+        scouterId: match.scout_name || 'Unknown', // Use scout_name as scouterId
+        gameYear: match.game_year,
+        metrics: match.metrics,
+        notes: match.notes || '',
+        timestamp: match.timestamp,
+        synced: true, // All Supabase data is synced
+      }));
+    } catch (error) {
+      console.error('Failed to fetch team matches:', error);
       return [];
     }
   }
