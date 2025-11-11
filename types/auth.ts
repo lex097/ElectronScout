@@ -2,7 +2,8 @@ export type UserRole = 'scouter' | 'administrator';
 
 export interface User {
   id: string;
-  username: string;
+  name: string;
+  teamNumber: string;
   role: UserRole;
 }
 

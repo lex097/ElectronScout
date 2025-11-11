@@ -19,17 +19,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true,
 
-  login: async (username: string, password: string, role: UserRole) => {
+  login: async (name: string, teamNumber: string, role: UserRole) => {
     // TODO: Replace with actual authentication logic
     // For now, simple validation
-    if (!username || !password) {
-      throw new Error('Username and password are required');
+    if (!name || !teamNumber) {
+      throw new Error('Name and team number are required');
     }
 
     // Simulate login - replace with real auth API call
     const user: User = {
       id: `user-${Date.now()}`,
-      username,
+      name,
+      teamNumber,
       role,
     };
 

@@ -15,20 +15,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [teamNumber, setTeamNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const login = useAuthStore((state) => state.login);
 
   const handleLogin = async (role: UserRole) => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter username and password');
+    if (!name.trim() || !teamNumber.trim()) {
+      Alert.alert('Error', 'Please enter name and team number');
       return;
     }
 
     setIsLoading(true);
     try {
-      await login(username, password, role);
+      await login(name, teamNumber, role);
       
       // Navigate based on role
       if (role === 'administrator') {
@@ -51,12 +51,12 @@ export default function LoginScreen() {
 
         <View style={styles.form}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
+            <Text style={styles.label}>Name</Text>
             <TextInput
               style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Enter username"
+              value={name}
+              onChangeText={setName}
+              placeholder="Enter name"
               autoCapitalize="none"
               autoCorrect={false}
               editable={!isLoading}
@@ -64,12 +64,12 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>Team Number</Text>
             <TextInput
               style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Enter password"
+              value={teamNumber}
+              onChangeText={setTeamNumber}
+              placeholder="Enter team number"
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
