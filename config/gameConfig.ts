@@ -174,32 +174,47 @@ export const getMetricById = (metricId: string, config: GameConfig = ACTIVE_GAME
 // Calculate total points for a match
 export const calculateMatchPoints = (metrics: Record<string, any>, config: GameConfig = ACTIVE_GAME_CONFIG): number => {
     let totalPoints = 0;
+    const breakdown: Record<string, number> = {};
   
     config.phases.forEach(phase => {
       phase.metrics.forEach(metric => {
         const value = metrics[metric.id];
+        let points = 0;
   
         switch (metric.type) {
           case 'counter':
             if (typeof value === 'number' && metric.points) {
-              totalPoints += value * metric.points;
+              points = value * metric.points;
+              totalPoints += points;
             }
             break;
   
           case 'boolean':
             if (value === true && metric.points) {
-              totalPoints += metric.points;
+              points = metric.points;
+              totalPoints += points;
             }
             break;
   
           case 'select':
             if (metric.pointsMap && typeof value === 'string') {
-              totalPoints += metric.pointsMap[value] || 0;
+              points = metric.pointsMap[value] || 0;
+              totalPoints += points;
             }
             break;
         }
+        
+        if (points > 0) {
+          breakdown[metric.id] = points;
+        }
       });
     });
+  
+    // console.log('Points Calculation:', {
+    //   metrics,
+    //   breakdown,
+    //   totalPoints
+    // });
   
     return totalPoints;
   };

@@ -1,46 +1,62 @@
 // app/(tabs)/analytics.tsx
-import { useState, useEffect, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  ScrollView, 
-  TouchableOpacity, 
-  RefreshControl,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import {SafeAreaView} from "react-native-safe-area-context";
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { db } from '../../services/database';
-import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
-import { MatchData } from '../../types/match';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from "react-native-safe-area-context";
 import { ACTIVE_GAME_CONFIG } from '../../config/gameConfig';
+import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
+import { db } from '../../services/database';
+import { supabaseSyncService } from '../../services/supabase.sync';
+import { syncManager } from '../../services/syncTransformer';
+import { MatchData } from '../../types/match';
 
 type SortField = 'teamNumber' | 'matchCount' | 'avgScore';
 type SortDirection = 'asc' | 'desc';
+type DataSource = 'local' | 'team';
 
 export default function AnalyticsScreen() {
   const [matches, setMatches] = useState<MatchData[]>([]);
+  const [teamMatches, setTeamMatches] = useState<MatchData[]>([]);
   const [teamAnalytics, setTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [sortField, setSortField] = useState<SortField>('teamNumber');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [dataSource, setDataSource] = useState<DataSource>('local');
 
   const loadData = async (showRefresh = false) => {
     try {
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
 
-      // Load all matches from local database
-      const allMatches = await db.getAllMatches();
-      setMatches(allMatches);
+      let matchesToAnalyze: MatchData[] = [];
+      
+      if (dataSource === 'local') {
+        // Load from local database
+        const allMatches = await db.getAllMatches();
+        setMatches(allMatches);
+        matchesToAnalyze = allMatches;
+      } else {
+        // Load from Supabase
+        const allTeamMatches = await supabaseSyncService.getAllTeamMatches();
+        setTeamMatches(allTeamMatches);
+        matchesToAnalyze = allTeamMatches;
+      }
 
       // Calculate analytics
-      if (allMatches.length > 0) {
-        const analytics = analyticsService.calculateTeamAnalytics(allMatches);
+      if (matchesToAnalyze.length > 0) {
+        const analytics = analyticsService.calculateTeamAnalytics(matchesToAnalyze);
         setTeamAnalytics(analytics);
       } else {
         setTeamAnalytics(new Map());
@@ -60,6 +76,11 @@ export default function AnalyticsScreen() {
       loadData();
     }, [])
   );
+
+  // Reload data when dataSource changes
+  useEffect(() => {
+    loadData();
+  }, [dataSource]);
 
   const handleClearData = () => {
     Alert.alert(
@@ -111,12 +132,39 @@ export default function AnalyticsScreen() {
     }
   };
 
+  const handleSyncNow = async () => {
+    if (matches.length === 0) {
+      Alert.alert('Nothing to sync', 'No local matches found.');
+      return;
+    }
+
+    setIsSyncing(true);
+
+    try {
+      const result = await syncManager.fullSync();
+
+      await loadData(true);
+
+      Alert.alert(
+        'Sync complete',
+        `${result.success} uploaded, ${result.failed} failed, ${result.skipped} skipped`
+      );
+    } catch (e) {
+      console.error('Sync error:', e);
+      Alert.alert('Sync error', 'An unexpected error occurred.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
       <Text style={styles.emptyTitle}>No Data Yet</Text>
       <Text style={styles.emptySubtitle}>
-        Start scouting matches to see analytics here
+        {dataSource === 'local' 
+          ? 'Start scouting matches to see analytics here'
+          : 'No team data available. Sync matches to see team analytics.'}
       </Text>
     </View>
   );
@@ -235,6 +283,44 @@ export default function AnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Segmented Control */}
+      <View style={styles.segmentedControl}>
+        <TouchableOpacity
+          style={[
+            styles.segmentButton,
+            styles.segmentButtonLeft,
+            dataSource === 'local' && styles.segmentButtonActive,
+          ]}
+          onPress={() => setDataSource('local')}
+        >
+          <Text
+            style={[
+              styles.segmentButtonText,
+              dataSource === 'local' && styles.segmentButtonTextActive,
+            ]}
+          >
+            My Data
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.segmentButton,
+            styles.segmentButtonRight,
+            dataSource === 'team' && styles.segmentButtonActive,
+          ]}
+          onPress={() => setDataSource('team')}
+        >
+          <Text
+            style={[
+              styles.segmentButtonText,
+              dataSource === 'team' && styles.segmentButtonTextActive,
+            ]}
+          >
+            Team Data
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         style={styles.scrollView}
         refreshControl={
@@ -244,17 +330,21 @@ export default function AnalyticsScreen() {
         {/* Stats Header */}
         <View style={styles.statsHeader}>
           <View style={styles.statBox}>
-            <Text style={styles.statNumber}>{matches.length}</Text>
+            <Text style={styles.statNumber}>
+              {dataSource === 'local' ? matches.length : teamMatches.length}
+            </Text>
             <Text style={styles.statLabel}>Total Matches</Text>
           </View>
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>{teamAnalytics.size}</Text>
             <Text style={styles.statLabel}>Teams Scouted</Text>
           </View>
-          <TouchableOpacity style={styles.statBox} onPress={handleClearData}>
-            <Ionicons name="trash-outline" size={24} color="#ef4444" />
-            <Text style={[styles.statLabel, { color: '#ef4444' }]}>Clear Data</Text>
-          </TouchableOpacity>
+          {dataSource === 'local' && (
+            <TouchableOpacity style={styles.statBox} onPress={handleClearData}>
+              <Ionicons name="trash-outline" size={24} color="#ef4444" />
+              <Text style={[styles.statLabel, { color: '#ef4444' }]}>Clear Data</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {teamAnalytics.size === 0 ? (
@@ -343,6 +433,22 @@ export default function AnalyticsScreen() {
             </View>
           </>
         )}
+        {dataSource === 'local' && (
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[styles.syncButton, isSyncing && styles.syncButtonDisabled]}
+              onPress={handleSyncNow}
+              disabled={isSyncing}
+            >
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Ionicons name="cloud-upload-outline" size={20} color="white" />
+              )}
+              <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -352,6 +458,45 @@ const styles = {
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  segmentedControl: {
+    flexDirection: 'row' as const,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 10,
+    padding: 4,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  segmentButtonLeft: {
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+  },
+  segmentButtonRight: {
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  segmentButtonActive: {
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentButtonText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#6b7280',
+  },
+  segmentButtonTextActive: {
+    color: '#1e40af',
   },
   scrollView: {
     flex: 1,
@@ -576,5 +721,25 @@ const styles = {
   matchHistoryDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  footer: {
+    padding: 16,
+  },
+  syncButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#1e40af',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  syncButtonDisabled: {
+    opacity: 0.7,
+  },
+  syncButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
 };
