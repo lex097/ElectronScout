@@ -60,7 +60,8 @@ function RootLayoutNav() {
         router.replace('/login');
       } else if (user?.role === 'administrator') {
         router.replace('/(admin)/dashboard');
-      } else if (user?.role === 'scouter') {
+      } else {
+        // Default to tabs for scouter or any authenticated user
         router.replace('/(tabs)');
       }
     }
@@ -70,6 +71,9 @@ function RootLayoutNav() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
+        <Stack.Screen name="verify-team-code" />
+        <Stack.Screen name="create-admin-code" />
+        <Stack.Screen name="team-created" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(admin)" />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />

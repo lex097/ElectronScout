@@ -1,16 +1,19 @@
 // app/login.tsx - Login Screen
+import { authService } from '@/services/authService';
 import { useAuthStore } from '@/stores/authStore';
-import { UserRole } from '@/types/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,24 +23,63 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const login = useAuthStore((state) => state.login);
 
-  const handleLogin = async (role: UserRole) => {
+  const handleContinue = async () => {
     if (!name.trim() || !teamNumber.trim()) {
       Alert.alert('Error', 'Please enter name and team number');
       return;
     }
 
+    // Validate team number is numeric
+    const teamNum = parseInt(teamNumber, 10);
+    if (isNaN(teamNum) || teamNum < 1 || teamNum > 9999) {
+      Alert.alert('Error', 'Please enter a valid team number (1-9999)');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await login(name, teamNumber, role);
-      
-      // Navigate based on role
-      if (role === 'administrator') {
-        router.replace('/(admin)/dashboard');
+      // Store name in AsyncStorage first (will be used in verification/creation screens)
+      await AsyncStorage.setItem('scout_name', name);
+
+      // Search for team by number
+      const teamSearch = await authService.searchTeamByNumber(teamNum);
+
+      if (teamSearch.exists && teamSearch.teamId) {
+        // Team exists - navigate to team code verification
+        router.push({
+          pathname: '/verify-team-code' as any,
+          params: {
+            teamId: teamSearch.teamId,
+            teamNumber: teamNumber,
+          },
+        });
       } else {
-        router.replace('/(tabs)');
+        // Team doesn't exist - create it
+        try {
+          const { teamId, teamCode } = await authService.createTeam(teamNum);
+          
+          // Navigate to admin code creation screen
+          router.push({
+            pathname: '/create-admin-code' as any,
+            params: {
+              teamId: teamId,
+              teamCode: teamCode,
+              teamNumber: teamNumber,
+            },
+          });
+        } catch (createError) {
+          Alert.alert(
+            'Error',
+            createError instanceof Error ? createError.message : 'Failed to create team. Please try again.'
+          );
+        }
       }
     } catch (error) {
-      Alert.alert('Login Failed', error instanceof Error ? error.message : 'Invalid credentials');
+      console.error('Login error:', error);
+      Alert.alert(
+        'Error',
+        'Unable to connect. Please check your internet connection and try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -45,65 +87,69 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>ElectronScout</Text>
-        <Text style={styles.subtitle}>FRC Scouting System</Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.content}>
+          <Text style={styles.title}>ElectronScout</Text>
+          <Text style={styles.subtitle}>FRC Scouting System</Text>
 
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="Enter name"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!isLoading}
-            />
-          </View>
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Name</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Enter name"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isLoading}
+                returnKeyType="next"
+                onSubmitEditing={() => {
+                  // Focus next input or dismiss keyboard
+                  Keyboard.dismiss();
+                }}
+                blurOnSubmit={false}
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Team Number</Text>
-            <TextInput
-              style={styles.input}
-              value={teamNumber}
-              onChangeText={setTeamNumber}
-              placeholder="Enter team number"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!isLoading}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Team Number</Text>
+              <TextInput
+                style={styles.input}
+                value={teamNumber}
+                onChangeText={setTeamNumber}
+                placeholder="Enter team number"
+                keyboardType="number-pad"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isLoading}
+                returnKeyType="done"
+                onSubmitEditing={() => {
+                  Keyboard.dismiss();
+                  if (name.trim() && teamNumber.trim()) {
+                    handleContinue();
+                  }
+                }}
+                blurOnSubmit={true}
+              />
+            </View>
 
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.scouterButton]}
-              onPress={() => handleLogin('scouter')}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Login as Scouter</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, styles.adminButton]}
-              onPress={() => handleLogin('administrator')}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Login as Administrator</Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={[styles.button, styles.continueButton]}
+                onPress={handleContinue}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Continue</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 }
@@ -162,11 +208,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 50,
   },
-  scouterButton: {
+  continueButton: {
     backgroundColor: '#1e40af',
-  },
-  adminButton: {
-    backgroundColor: '#10b981',
   },
   buttonText: {
     color: 'white',
