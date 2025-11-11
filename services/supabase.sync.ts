@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 export class SupabaseSyncService {
   
   // 🧪 MOCK MODE: Set to true for testing without auth
-  private MOCK_MODE = true;
+  private MOCK_MODE = false; // Disabled to use real team data from AsyncStorage
   private MOCK_TEAM_NUMBER = 1234;
   private MOCK_SCOUT_NAME = 'Test Scout';
   private MOCK_TEAM_CODE = 'ABC123'; // Mock team code for testing
@@ -199,10 +199,10 @@ export class SupabaseSyncService {
 
       const insertData = {
         id: match.id,
-        team_id: teamId,
+        team_id: teamId, // team_id = the scouting team (team that submitted this data)
         event_id: match.event_id || null,
         match_number: match.match_number,
-        team_number: match.team_number,
+        team_number: match.team_number, // team_number = the team being scouted
         scout_name: scoutName,
         game_year: match.game_year,
         metrics: match.metrics,
@@ -210,6 +210,8 @@ export class SupabaseSyncService {
         notes: match.notes,
         timestamp: match.timestamp,
       };
+      
+      console.log('Inserting match with team_id:', teamId, 'for scouted team:', match.team_number);
       
       // console.log('Inserting to Supabase:', {
       //   id: insertData.id,
@@ -270,10 +272,10 @@ export class SupabaseSyncService {
         
         const insertData = batch.map(m => ({
           id: m.id,
-          team_id: teamId,
+          team_id: teamId, // team_id = the scouting team (team that submitted this data)
           event_id: m.event_id || null,
           match_number: m.match_number,
-          team_number: m.team_number,
+          team_number: m.team_number, // team_number = the team being scouted
           scout_name: m.scout_name || scoutName,
           game_year: m.game_year,
           metrics: m.metrics,
@@ -281,6 +283,8 @@ export class SupabaseSyncService {
           notes: m.notes,
           timestamp: m.timestamp,
         }));
+        
+        console.log(`Batch inserting ${batch.length} matches with team_id:`, teamId);
         
       // console.log('Batch inserting to Supabase:', 
       //   insertData.map(d => ({ 
@@ -377,7 +381,8 @@ export class SupabaseSyncService {
   }
 
   /**
-   * Fetch all matches for the current team from Supabase
+   * Fetch all matches submitted by the current team (filtered by team_id)
+   * Only returns matches where team_id matches the logged-in user's team
    * Returns matches in MatchData format for analytics
    */
   async getAllTeamMatches(): Promise<Array<{
@@ -398,10 +403,12 @@ export class SupabaseSyncService {
         return [];
       }
       
+      console.log('Fetching matches for team_id:', teamId);
+      
       const { data, error } = await this.getSupabaseClient()
         .from('matches')
         .select('*')
-        .eq('team_id', teamId)
+        .eq('team_id', teamId) // Only get matches submitted by this team
         .order('timestamp', { ascending: false });
       
       if (error) {

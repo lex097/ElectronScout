@@ -1,9 +1,9 @@
-import NetInfo from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { syncManager } from './syncTransformer';
 
 // Initialize auto-sync when app starts
 export function initAutoSync() {
-  NetInfo.addEventListener(state => {
+  NetInfo.addEventListener((state: NetInfoState) => {
     const isConnected = state.isConnected ?? false;
     
     if (isConnected) {
