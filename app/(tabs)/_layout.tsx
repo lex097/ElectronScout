@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs, router } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Pressable } from 'react-native';
 
@@ -64,20 +64,6 @@ export default function TabLayout() {
                 color={Colors[colorScheme ?? 'light'].text}
               />
             </Pressable>
-          ),
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="info-circle"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
           ),
         }}
       />

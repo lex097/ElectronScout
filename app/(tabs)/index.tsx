@@ -4,6 +4,7 @@ import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
+import { supabaseSyncService } from '../../services/supabase.sync';
 import { MatchData } from '../../types/match';
 
 export default function MatchScoutScreen() {
@@ -13,6 +14,8 @@ export default function MatchScoutScreen() {
   const [metrics, setMetrics] = useState(getInitialMatchData());
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
 
@@ -20,6 +23,50 @@ export default function MatchScoutScreen() {
     // Initialize database on mount
     db.init().catch(console.error);
   }, []);
+
+  // Check for duplicate matches when match number or team number changes
+  useEffect(() => {
+    const checkDuplicate = async () => {
+      const matchNum = parseInt(matchNumber);
+      const teamNum = parseInt(teamNumber);
+
+      // Only check if both values are valid numbers
+      if (!matchNumber || !teamNumber || isNaN(matchNum) || isNaN(teamNum)) {
+        setDuplicateWarning(null);
+        return;
+      }
+
+      setIsCheckingDuplicate(true);
+      try {
+        // Check local database
+        const localExists = await db.checkMatchExists(matchNum, teamNum);
+        
+        // Check Supabase
+        const remoteExists = await supabaseSyncService.checkMatchExists(matchNum, teamNum);
+
+        if (localExists || remoteExists) {
+          const sources = [];
+          if (localExists) sources.push('local');
+          if (remoteExists) sources.push('global');
+          setDuplicateWarning(
+            `Warning: A match with Match #${matchNum} and Team #${teamNum} already exists in your ${sources.join(' and ')} data. You can still continue to save if this is intentional.`
+          );
+        } else {
+          setDuplicateWarning(null);
+        }
+      } catch (error) {
+        console.error('Error checking for duplicate:', error);
+        // Don't show error to user, just silently fail
+        setDuplicateWarning(null);
+      } finally {
+        setIsCheckingDuplicate(false);
+      }
+    };
+
+    // Debounce the check to avoid too many queries
+    const timeoutId = setTimeout(checkDuplicate, 500);
+    return () => clearTimeout(timeoutId);
+  }, [matchNumber, teamNumber]);
 
   const updateMetric = (metricId: string, value: any) => {
     setMetrics(prev => ({
@@ -194,6 +241,13 @@ export default function MatchScoutScreen() {
             />
           </View>
         </View>
+
+        {/* Duplicate Warning */}
+        {duplicateWarning && (
+          <View style={styles.warningContainer}>
+            <Text style={styles.warningText}>{duplicateWarning}</Text>
+          </View>
+        )}
 
         {/* Phase Tabs */}
         <View style={styles.phaseTabs}>
@@ -441,5 +495,18 @@ const styles = {
     fontSize: 18,
     fontWeight: 'bold' as const,
     color: 'white',
+  },
+  warningContainer: {
+    backgroundColor: '#fef3c7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#92400e',
+    lineHeight: 20,
   },
 };

@@ -1,6 +1,6 @@
 // services/database.ts
-import * as SQLite from 'expo-sqlite';
 import { MatchData } from '@/types/match';
+import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'frc_scout.db';
 
@@ -142,6 +142,18 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
 
     await this.db.runAsync('DELETE FROM matches');
+  }
+
+  // Check if a match with the same match_number and team_number exists
+  async checkMatchExists(matchNumber: number, teamNumber: number): Promise<boolean> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM matches WHERE match_number = ? AND team_number = ?',
+      [matchNumber, teamNumber]
+    );
+
+    return (result?.count || 0) > 0;
   }
 
   // Helper to convert DB row to MatchData
