@@ -1,5 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -7,6 +8,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { queryClient } from '@/config/queryClient';
 import { useAuthStore } from '@/stores/authStore';
 
 export {
@@ -68,16 +70,21 @@ function RootLayoutNav() {
   }, [isAuthenticated, user, isLoading]);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="verify-team-code" />
-        <Stack.Screen name="create-admin-code" />
-        <Stack.Screen name="team-created" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="(admin)" />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="login" />
+          <Stack.Screen name="verify-team-code" />
+          <Stack.Screen name="create-admin-code" />
+          <Stack.Screen name="team-created" />
+          <Stack.Screen name="select-event" />
+          <Stack.Screen name="select-match" />
+          <Stack.Screen name="select-team" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="(admin)" />
+          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        </Stack>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }

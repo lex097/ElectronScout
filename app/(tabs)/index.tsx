@@ -1,25 +1,106 @@
 // app/(tabs)/index.tsx - Match Scouting Screen
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
+import { useAuthStore } from '../../stores/authStore';
 import { MatchData } from '../../types/match';
 
+const TBA_MODE_KEY = 'tba_mode_enabled';
+const SELECTED_EVENT_KEY = 'selected_event_key';
+const SELECTED_EVENT_NAME_KEY = 'selected_event_name';
+const SELECTED_MATCH_KEY = 'selected_match_key';
+const SELECTED_MATCH_NUMBER_KEY = 'selected_match_number';
+
 export default function MatchScoutScreen() {
+  const params = useLocalSearchParams<{
+    matchNumber?: string;
+    teamNumber?: string;
+    fromTBA?: string;
+  }>();
+
+  const [isTBAMode, setIsTBAMode] = useState(true);
   const [matchNumber, setMatchNumber] = useState('1');
   const [teamNumber, setTeamNumber] = useState('');
+  const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
+  const [selectedMatchNumber, setSelectedMatchNumber] = useState<string | null>(null);
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
   const [metrics, setMetrics] = useState(getInitialMatchData());
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const getScoutName = useAuthStore((state) => state.getScoutName);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
 
   useEffect(() => {
     // Initialize database on mount
     db.init().catch(console.error);
+
+    // Load TBA mode preference and selected event/match from AsyncStorage
+    const loadPreferences = async () => {
+      try {
+        const tbaMode = await AsyncStorage.getItem(TBA_MODE_KEY);
+        if (tbaMode !== null) {
+          setIsTBAMode(tbaMode === 'true');
+        }
+
+        const eventName = await AsyncStorage.getItem(SELECTED_EVENT_NAME_KEY);
+        if (eventName) {
+          setSelectedEventName(eventName);
+        }
+
+        const matchNum = await AsyncStorage.getItem(SELECTED_MATCH_NUMBER_KEY);
+        if (matchNum) {
+          setSelectedMatchNumber(matchNum);
+        }
+      } catch (error) {
+        console.error('Error loading preferences:', error);
+      }
+    };
+
+    loadPreferences();
   }, []);
+
+  // Reload preferences when screen comes into focus (user may have selected new event/match)
+  useFocusEffect(
+    useCallback(() => {
+      const reloadPreferences = async () => {
+        try {
+          const eventName = await AsyncStorage.getItem(SELECTED_EVENT_NAME_KEY);
+          setSelectedEventName(eventName);
+
+          const matchNum = await AsyncStorage.getItem(SELECTED_MATCH_NUMBER_KEY);
+          setSelectedMatchNumber(matchNum);
+        } catch (error) {
+          console.error('Error reloading preferences:', error);
+        }
+      };
+
+      reloadPreferences();
+    }, [])
+  );
+
+  // Handle route params from select-team screen
+  useEffect(() => {
+    if (params.fromTBA === 'true' && params.matchNumber && params.teamNumber) {
+      setMatchNumber(params.matchNumber);
+      setTeamNumber(params.teamNumber);
+      setIsTBAMode(true);
+    }
+  }, [params]);
+
+  const handleTBAModeToggle = async (value: boolean) => {
+    setIsTBAMode(value);
+    await AsyncStorage.setItem(TBA_MODE_KEY, value.toString());
+  };
+
+  const handleSelectEvent = () => {
+    router.push('/select-event' as any);
+  };
 
   const updateMetric = (metricId: string, value: any) => {
     setMetrics(prev => ({
@@ -85,31 +166,31 @@ export default function MatchScoutScreen() {
           </TouchableOpacity>
         );
 
-      case 'select':
-        return (
-          <View key={metric.id} style={styles.metricContainer}>
-            <Text style={styles.metricLabel}>{metric.label}</Text>
-            <View style={styles.selectContainer}>
-              {metric.options?.map(option => (
-                <TouchableOpacity
-                  key={option}
-                  style={[
-                    styles.selectButton,
-                    value === option && styles.selectButtonActive
-                  ]}
-                  onPress={() => updateMetric(metric.id, option)}
-                >
-                  <Text style={[
-                    styles.selectButtonText,
-                    value === option && styles.selectButtonTextActive
-                  ]}>
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+        case 'select':
+          return (
+            <View key={metric.id} style={styles.metricContainer}>
+              <Text style={styles.metricLabel}>{metric.label}</Text>
+              <View style={styles.selectContainer}>
+                {metric.options?.map(option => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.selectOptionButton,
+                      value === option && styles.selectOptionButtonActive
+                    ]}
+                    onPress={() => updateMetric(metric.id, option)}
+                  >
+                    <Text style={[
+                      styles.selectOptionButtonText,
+                      value === option && styles.selectOptionButtonTextActive
+                    ]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </View>
-        );
+          );
 
       default:
         return null;
@@ -125,11 +206,12 @@ export default function MatchScoutScreen() {
     setIsSaving(true);
 
     try {
+      const scoutName = await getScoutName();
       const matchData: MatchData = {
         id: `${Date.now()}-${matchNumber}-${teamNumber}`,
         matchNumber: parseInt(matchNumber),
         teamNumber: parseInt(teamNumber),
-        scouterId: 'local-user', // TODO: Replace with actual user ID
+        scouterId: scoutName || 'unknown',
         gameYear: ACTIVE_GAME_CONFIG.year,
         metrics,
         timestamp: Date.now(),
@@ -145,9 +227,24 @@ export default function MatchScoutScreen() {
         [
           {
             text: 'New Match',
-            onPress: () => {
-              setMatchNumber((parseInt(matchNumber) + 1).toString());
-              setTeamNumber('');
+            onPress: async () => {
+              if (isTBAMode) {
+                // In TBA mode, go back to match selection
+                const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+                if (eventKey) {
+                  router.push({
+                    pathname: '/select-match' as any,
+                    params: { eventKey },
+                  });
+                } else {
+                  // If no event key, go to event selection
+                  router.push('/select-event' as any);
+                }
+              } else {
+                // In manual mode, increment match number
+                setMatchNumber((parseInt(matchNumber) + 1).toString());
+                setTeamNumber('');
+              }
               setMetrics(getInitialMatchData());
               setNotes('');
               setCurrentPhaseIndex(0);
@@ -170,30 +267,117 @@ export default function MatchScoutScreen() {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Match Info */}
-        <View style={styles.matchInfo}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Match #</Text>
-            <TextInput
-              style={styles.input}
-              value={matchNumber}
-              onChangeText={setMatchNumber}
-              keyboardType="number-pad"
-              placeholder="1"
-            />
+        {/* TBA Mode Toggle */}
+        <View style={styles.toggleContainer}>
+          <View style={styles.toggleLabelContainer}>
+            <Text style={styles.toggleLabel}>TBA Mode</Text>
+            <Text style={styles.toggleSubtext}>
+              {isTBAMode ? 'Using The Blue Alliance' : 'Manual Entry'}
+            </Text>
           </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Team #</Text>
-            <TextInput
-              style={styles.input}
-              value={teamNumber}
-              onChangeText={setTeamNumber}
-              keyboardType="number-pad"
-              placeholder="1234"
-            />
-          </View>
+          <Switch
+            value={isTBAMode}
+            onValueChange={handleTBAModeToggle}
+            trackColor={{ false: '#d1d5db', true: '#1e40af' }}
+            thumbColor={isTBAMode ? '#ffffff' : '#f4f3f4'}
+          />
         </View>
+
+        {/* Match Info */}
+        {isTBAMode ? (
+          <View style={styles.tbaInfoContainer}>
+            {selectedEventName ? (
+              <View style={styles.tbaInfoCard}>
+                <Text style={styles.tbaInfoLabel}>Event</Text>
+                <Text style={styles.tbaInfoValue}>{selectedEventName}</Text>
+                <TouchableOpacity
+                  style={styles.changeButton}
+                  onPress={handleSelectEvent}
+                >
+                  <Text style={styles.changeButtonText}>Change Event</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.tbaInfoCard}>
+                <Text style={styles.tbaInfoLabel}>No Event Selected</Text>
+                <TouchableOpacity
+                  style={styles.selectButton}
+                  onPress={handleSelectEvent}
+                >
+                  <Text style={styles.selectButtonText}>Select Event</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={styles.matchInfo}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Match #</Text>
+                <TextInput
+                  style={styles.input}
+                  value={matchNumber}
+                  onChangeText={setMatchNumber}
+                  keyboardType="number-pad"
+                  placeholder="1"
+                  editable={!selectedMatchNumber}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Team #</Text>
+                <TextInput
+                  style={styles.input}
+                  value={teamNumber}
+                  onChangeText={setTeamNumber}
+                  keyboardType="number-pad"
+                  placeholder="1234"
+                />
+              </View>
+            </View>
+
+            {selectedMatchNumber && (
+              <TouchableOpacity
+                style={styles.selectMatchButton}
+                onPress={async () => {
+                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+                  if (eventKey) {
+                    router.push({
+                      pathname: '/select-match' as any,
+                      params: { eventKey },
+                    });
+                  } else {
+                    handleSelectEvent();
+                  }
+                }}
+              >
+                <Text style={styles.selectMatchButtonText}>Change Match/Team</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View style={styles.matchInfo}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Match #</Text>
+              <TextInput
+                style={styles.input}
+                value={matchNumber}
+                onChangeText={setMatchNumber}
+                keyboardType="number-pad"
+                placeholder="1"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Team #</Text>
+              <TextInput
+                style={styles.input}
+                value={teamNumber}
+                onChangeText={setTeamNumber}
+                keyboardType="number-pad"
+                placeholder="1234"
+              />
+            </View>
+          </View>
+        )}
 
         {/* Phase Tabs */}
         <View style={styles.phaseTabs}>
@@ -394,24 +578,26 @@ const styles = {
   selectContainer: {
     gap: 8,
   },
-  selectButton: {
+  selectOptionButton: {
+    flex: 1,
+    minWidth: '30%',
     backgroundColor: '#f3f4f6',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center' as const,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: '#93c5fd',
   },
-  selectButtonActive: {
+  selectOptionButtonActive: {
     backgroundColor: '#1e40af',
     borderColor: '#1e40af',
   },
-  selectButtonText: {
+  selectOptionButtonText: {
     fontSize: 16,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#1e3a8a',
   },
-  selectButtonTextActive: {
+  selectOptionButtonTextActive: {
     color: 'white',
   },
   notesSection: {
@@ -441,5 +627,86 @@ const styles = {
     fontSize: 18,
     fontWeight: 'bold' as const,
     color: 'white',
+  },
+  toggleContainer: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  toggleLabelContainer: {
+    flex: 1,
+  },
+  toggleLabel: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  toggleSubtext: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  tbaInfoContainer: {
+    marginBottom: 16,
+  },
+  tbaInfoCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  tbaInfoLabel: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#6b7280',
+    marginBottom: 4,
+    textTransform: 'uppercase' as const,
+  },
+  tbaInfoValue: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+  changeButton: {
+    backgroundColor: '#eff6ff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignSelf: 'flex-start' as const,
+  },
+  changeButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#1e40af',
+  },
+  selectButton: {
+    backgroundColor: '#1e40af',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+  },
+  selectButtonText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: 'white',
+  },
+  selectMatchButton: {
+    backgroundColor: '#eff6ff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    marginTop: 8,
+  },
+  selectMatchButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#1e40af',
   },
 };
