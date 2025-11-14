@@ -1,25 +1,50 @@
 // app/select-event.tsx - Event Selection Screen
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEvents } from '@/hooks/useEvents';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
+import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 
 const CURRENT_YEAR = ACTIVE_GAME_CONFIG.year;
 
+const getLocationString = (event: any) => {
+  const parts = [event.city, event.state_prov, event.country].filter(Boolean);
+  return parts.join(', ') || 'Location TBD';
+};
+
 export default function SelectEventScreen() {
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
+  const [searchQuery, setSearchQuery] = useState('');
   const { data: events, isLoading, error } = useEvents(selectedYear);
+
+  // Filter events based on search query (real-time filtering)
+  const filteredEvents = useMemo(() => {
+    if (!events) return [];
+    if (!searchQuery.trim()) return events;
+
+    const query = searchQuery.toLowerCase().trim();
+    return events.filter((event) => {
+      const name = event.name?.toLowerCase() || '';
+      const location = getLocationString(event).toLowerCase();
+      const eventCode = event.event_code?.toLowerCase() || '';
+      
+      return (
+        name.includes(query) ||
+        location.includes(query) ||
+        eventCode.includes(query)
+      );
+    });
+  }, [events, searchQuery]);
 
   const handleSelectEvent = async (event: any) => {
     // Save selected event info to AsyncStorage
@@ -43,11 +68,6 @@ export default function SelectEventScreen() {
     } catch {
       return dateString;
     }
-  };
-
-  const getLocationString = (event: any) => {
-    const parts = [event.city, event.state_prov, event.country].filter(Boolean);
-    return parts.join(', ') || 'Location TBD';
   };
 
   if (isLoading) {
@@ -106,8 +126,21 @@ export default function SelectEventScreen() {
         <Text style={styles.subtitle}>{selectedYear} Season</Text>
       </View>
 
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search events by name, location, or code..."
+          placeholderTextColor="#9ca3af"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
       <FlatList
-        data={events}
+        data={filteredEvents}
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -127,7 +160,11 @@ export default function SelectEventScreen() {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No events available</Text>
+            <Text style={styles.emptyText}>
+              {searchQuery.trim() 
+                ? `No events found matching "${searchQuery}"` 
+                : 'No events available'}
+            </Text>
           </View>
         }
       />
@@ -222,6 +259,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  searchContainer: {
+    backgroundColor: 'white',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  searchInput: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#1f2937',
   },
   listContent: {
     padding: 16,

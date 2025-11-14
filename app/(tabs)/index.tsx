@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
@@ -267,22 +267,6 @@ export default function MatchScoutScreen() {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* TBA Mode Toggle */}
-        <View style={styles.toggleContainer}>
-          <View style={styles.toggleLabelContainer}>
-            <Text style={styles.toggleLabel}>TBA Mode</Text>
-            <Text style={styles.toggleSubtext}>
-              {isTBAMode ? 'Using The Blue Alliance' : 'Manual Entry'}
-            </Text>
-          </View>
-          <Switch
-            value={isTBAMode}
-            onValueChange={handleTBAModeToggle}
-            trackColor={{ false: '#d1d5db', true: '#1e40af' }}
-            thumbColor={isTBAMode ? '#ffffff' : '#f4f3f4'}
-          />
-        </View>
-
         {/* Match Info */}
         {isTBAMode ? (
           <View style={styles.tbaInfoContainer}>
@@ -309,6 +293,25 @@ export default function MatchScoutScreen() {
               </View>
             )}
 
+            {selectedMatchNumber && (
+              <TouchableOpacity
+                style={styles.selectMatchButton}
+                onPress={async () => {
+                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+                  if (eventKey) {
+                    router.push({
+                      pathname: '/select-match' as any,
+                      params: { eventKey },
+                    });
+                  } else {
+                    handleSelectEvent();
+                  }
+                }}
+              >
+                <Text style={styles.selectMatchButtonText}>Choose Match and Team</Text>
+              </TouchableOpacity>
+            )}
+
             <View style={styles.matchInfo}>
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Match #</Text>
@@ -333,25 +336,6 @@ export default function MatchScoutScreen() {
                 />
               </View>
             </View>
-
-            {selectedMatchNumber && (
-              <TouchableOpacity
-                style={styles.selectMatchButton}
-                onPress={async () => {
-                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
-                  if (eventKey) {
-                    router.push({
-                      pathname: '/select-match' as any,
-                      params: { eventKey },
-                    });
-                  } else {
-                    handleSelectEvent();
-                  }
-                }}
-              >
-                <Text style={styles.selectMatchButtonText}>Change Match/Team</Text>
-              </TouchableOpacity>
-            )}
           </View>
         ) : (
           <View style={styles.matchInfo}>

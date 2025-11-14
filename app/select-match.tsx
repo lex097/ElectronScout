@@ -1,16 +1,16 @@
 // app/select-match.tsx - Match Selection Screen
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEventMatches } from '@/hooks/useEventMatches';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   SectionList,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TBAMatch } from '../api/types';
@@ -18,6 +18,7 @@ import { TBAMatch } from '../api/types';
 export default function SelectMatchScreen() {
   const params = useLocalSearchParams<{ eventKey: string }>();
   const { eventKey } = params;
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { data: matches, isLoading, error } = useEventMatches(eventKey || null);
 
@@ -60,12 +61,26 @@ export default function SelectMatchScreen() {
     return labels[compLevel] || compLevel.toUpperCase();
   };
 
-  // Group matches by comp_level
+  // Filter and group matches by comp_level
   const groupedMatches = useMemo(() => {
     if (!matches) return [];
 
+    // Filter matches by match number if search query is provided
+    let filteredMatches = matches;
+    if (searchQuery.trim()) {
+      const matchNumber = parseInt(searchQuery.trim(), 10);
+      if (!isNaN(matchNumber)) {
+        filteredMatches = matches.filter(
+          (match) => match.match_number === matchNumber
+        );
+      } else {
+        // If not a valid number, return empty
+        filteredMatches = [];
+      }
+    }
+
     const groups: Record<string, TBAMatch[]> = {};
-    matches.forEach((match) => {
+    filteredMatches.forEach((match) => {
       if (!groups[match.comp_level]) {
         groups[match.comp_level] = [];
       }
@@ -80,7 +95,7 @@ export default function SelectMatchScreen() {
         title: getCompLevelLabel(level),
         data: groups[level],
       }));
-  }, [matches]);
+  }, [matches, searchQuery]);
 
   if (isLoading) {
     return (
@@ -138,6 +153,20 @@ export default function SelectMatchScreen() {
         <Text style={styles.subtitle}>{matches.length} matches available</Text>
       </View>
 
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by match number..."
+          placeholderTextColor="#9ca3af"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          keyboardType="number-pad"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
       <SectionList
         sections={groupedMatches}
         keyExtractor={(item) => item.key}
@@ -183,6 +212,15 @@ export default function SelectMatchScreen() {
           </View>
         )}
         contentContainerStyle={styles.listContent}
+        ListEmptyComponent={
+          searchQuery.trim() && groupedMatches.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                No matches found for match number {searchQuery}
+              </Text>
+            </View>
+          ) : null
+        }
       />
     </SafeAreaView>
   );
@@ -207,6 +245,20 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
+  },
+  searchContainer: {
+    backgroundColor: 'white',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  searchInput: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#1f2937',
   },
   loadingContainer: {
     flex: 1,
