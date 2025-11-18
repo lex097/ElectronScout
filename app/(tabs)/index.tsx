@@ -262,10 +262,6 @@ export default function MatchScoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>FRC Scout - {ACTIVE_GAME_CONFIG.gameName}</Text>
-      </View>
-
       <ScrollView style={styles.content}>
         {/* Match Info */}
         {isTBAMode ? (
@@ -321,7 +317,6 @@ export default function MatchScoutScreen() {
                   onChangeText={setMatchNumber}
                   keyboardType="number-pad"
                   placeholder="1"
-                  editable={!selectedMatchNumber}
                 />
               </View>
 
@@ -346,7 +341,6 @@ export default function MatchScoutScreen() {
                 value={matchNumber}
                 onChangeText={setMatchNumber}
                 keyboardType="number-pad"
-                placeholder="1"
               />
             </View>
 

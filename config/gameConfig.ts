@@ -40,6 +40,13 @@ export const GAME_2025: GameConfig = {
         duration: 15,
         metrics: [
           {
+            id: "mobility",
+            type: "boolean",
+            label: "Left Starting Zone",
+            points: 2,
+            defaultValue: false
+          },
+          {
             id: "autoL4",
             type: "counter",
             label: "L4 Coral",
@@ -71,13 +78,6 @@ export const GAME_2025: GameConfig = {
             max: 24,
             defaultValue: 0
           },
-          {
-            id: "mobility",
-            type: "boolean",
-            label: "Left Starting Zone",
-            points: 2,
-            defaultValue: false
-          }
         ]
       },
       {
