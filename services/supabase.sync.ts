@@ -381,6 +381,36 @@ export class SupabaseSyncService {
   }
 
   /**
+   * Check if a match with the same match_number and team_number exists for the current team
+   */
+  async checkMatchExists(matchNumber: number, teamNumber: number): Promise<boolean> {
+    try {
+      const teamId = await this.getTeamId();
+      if (!teamId) {
+        return false;
+      }
+
+      const { data, error } = await this.getSupabaseClient()
+        .from('matches')
+        .select('id')
+        .eq('team_id', teamId)
+        .eq('match_number', matchNumber)
+        .eq('team_number', teamNumber)
+        .limit(1);
+
+      if (error) {
+        console.error('Error checking for duplicate match:', error);
+        return false;
+      }
+
+      return (data?.length || 0) > 0;
+    } catch (error) {
+      console.error('Failed to check for duplicate match:', error);
+      return false;
+    }
+  }
+
+  /**
    * Fetch all matches submitted by the current team (filtered by team_id)
    * Only returns matches where team_id matches the logged-in user's team
    * Returns matches in MatchData format for analytics
