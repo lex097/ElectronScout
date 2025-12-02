@@ -103,6 +103,30 @@ export default function AnalyticsScreen() {
     );
   };
 
+  const handleDeleteMatch = async (matchId: string, matchNumber: number, teamNumber: number) => {
+    Alert.alert(
+      'Delete Match',
+      `Are you sure you want to delete Match ${matchNumber} for Team ${teamNumber}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await db.deleteMatch(matchId);
+              await loadData();
+              Alert.alert('Success', 'Match deleted successfully');
+            } catch (error) {
+              console.error('Failed to delete match:', error);
+              Alert.alert('Error', 'Failed to delete match');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getSortedTeams = () => {
     const teamsArray = Array.from(teamAnalytics.values());
 
@@ -410,12 +434,22 @@ export default function AnalyticsScreen() {
             <Text style={styles.sectionLabel}>Recent Matches</Text>
             {team.matchHistory.slice(-3).reverse().map(match => (
               <View key={match.id} style={styles.matchHistoryItem}>
-                <Text style={styles.matchHistoryText}>
-                  Match {match.matchNumber}
-                </Text>
-                <Text style={styles.matchHistoryDate}>
-                  {new Date(match.timestamp).toLocaleDateString()}
-                </Text>
+                <View style={styles.matchHistoryInfo}>
+                  <Text style={styles.matchHistoryText}>
+                    Match {match.matchNumber}
+                  </Text>
+                  <Text style={styles.matchHistoryDate}>
+                    {new Date(match.timestamp).toLocaleDateString()}
+                  </Text>
+                </View>
+                {dataSource === 'local' && (
+                  <TouchableOpacity
+                    onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
+                    style={styles.deleteMatchButton}
+                  >
+                    <Ionicons name="close-circle" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </View>
@@ -878,9 +912,13 @@ const styles = {
   matchHistoryItem: {
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
+  },
+  matchHistoryInfo: {
+    flex: 1,
   },
   matchHistoryText: {
     fontSize: 14,
@@ -889,6 +927,10 @@ const styles = {
   matchHistoryDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  deleteMatchButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   footer: {
     padding: 16,
