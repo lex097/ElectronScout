@@ -5,21 +5,23 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   RefreshControl,
   ScrollView,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { LineChart } from 'react-native-chart-kit';
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ACTIVE_GAME_CONFIG } from '../../config/gameConfig';
+import { ACTIVE_GAME_CONFIG, calculateMatchPoints, GameConfig } from '../../config/gameConfig';
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
 import { supabaseSyncService } from '../../services/supabase.sync';
 import { syncManager } from '../../services/syncTransformer';
 import { MatchData } from '../../types/match';
 
-type SortField = 'teamNumber' | 'matchCount' | 'avgScore';
+type SortField = 'avgScore' | 'avgAuto' | 'avgTeleop' | 'avgEndgame';
 type SortDirection = 'asc' | 'desc';
 type DataSource = 'local' | 'team';
 
@@ -29,8 +31,8 @@ export default function AnalyticsScreen() {
   const [teamAnalytics, setTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [sortField, setSortField] = useState<SortField>('teamNumber');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [sortField, setSortField] = useState<SortField>('avgScore');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>('local');
@@ -101,22 +103,81 @@ export default function AnalyticsScreen() {
     );
   };
 
+  const handleDeleteMatch = async (matchId: string, matchNumber: number, teamNumber: number) => {
+    Alert.alert(
+      'Delete Match',
+      `Are you sure you want to delete Match ${matchNumber} for Team ${teamNumber}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await db.deleteMatch(matchId);
+              await loadData();
+              Alert.alert('Success', 'Match deleted successfully');
+            } catch (error) {
+              console.error('Failed to delete match:', error);
+              Alert.alert('Error', 'Failed to delete match');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getSortedTeams = () => {
     const teamsArray = Array.from(teamAnalytics.values());
 
     return teamsArray.sort((a, b) => {
+      // Multi-level sort: score first, then auto, teleop, endgame
+      const aScore = a.averagePoints;
+      const bScore = b.averagePoints;
+      
+      const aAuto = getAveragePhasePoints(a, 'auto');
+      const bAuto = getAveragePhasePoints(b, 'auto');
+      
+      const aTeleop = getAveragePhasePoints(a, 'teleop');
+      const bTeleop = getAveragePhasePoints(b, 'teleop');
+      
+      const aEndgame = getAveragePhasePoints(a, 'endgame');
+      const bEndgame = getAveragePhasePoints(b, 'endgame');
+      
+      // Primary sort by selected field
       let comparison = 0;
-
       switch (sortField) {
-        case 'teamNumber':
-          comparison = a.teamNumber - b.teamNumber;
-          break;
-        case 'matchCount':
-          comparison = a.totalMatches - b.totalMatches;
-          break;
         case 'avgScore':
-          comparison = a.averagePoints - b.averagePoints;
+          comparison = aScore - bScore;
           break;
+        case 'avgAuto':
+          comparison = aAuto - bAuto;
+          break;
+        case 'avgTeleop':
+          comparison = aTeleop - bTeleop;
+          break;
+        case 'avgEndgame':
+          comparison = aEndgame - bEndgame;
+          break;
+      }
+      
+      // If primary sort is equal, use tiebreakers in order: score → auto → teleop → endgame
+      if (comparison === 0) {
+        // Define tiebreaker order
+        const tiebreakers = [
+          { field: 'avgScore', value: aScore - bScore },
+          { field: 'avgAuto', value: aAuto - bAuto },
+          { field: 'avgTeleop', value: aTeleop - bTeleop },
+          { field: 'avgEndgame', value: aEndgame - bEndgame },
+        ];
+        
+        // Use tiebreakers in order, skipping the primary sort field
+        for (const tiebreaker of tiebreakers) {
+          if (tiebreaker.field !== sortField && comparison === 0) {
+            comparison = tiebreaker.value;
+            if (comparison !== 0) break;
+          }
+        }
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -157,6 +218,79 @@ export default function AnalyticsScreen() {
     }
   };
 
+  const calculatePhasePoints = (metrics: Record<string, any>, phaseId: string, config: GameConfig = ACTIVE_GAME_CONFIG): number => {
+    let phasePoints = 0;
+    const phase = config.phases.find(p => p.id === phaseId);
+    
+    if (!phase) return 0;
+    
+    phase.metrics.forEach(metric => {
+      const value = metrics[metric.id];
+      let points = 0;
+      
+      switch (metric.type) {
+        case 'counter':
+          if (typeof value === 'number' && metric.points) {
+            points = value * metric.points;
+            phasePoints += points;
+          }
+          break;
+        
+        case 'boolean':
+          if (value === true && metric.points) {
+            points = metric.points;
+            phasePoints += points;
+          }
+          break;
+        
+        case 'select':
+          if (metric.pointsMap && typeof value === 'string') {
+            points = metric.pointsMap[value] || 0;
+            phasePoints += points;
+          }
+          break;
+      }
+    });
+    
+    return phasePoints;
+  };
+
+  const getAveragePhasePoints = (team: TeamAnalytics, phaseId: string): number => {
+    if (team.matchHistory.length === 0) return 0;
+    
+    const totalPhasePoints = team.matchHistory.reduce((sum, match) => {
+      return sum + calculatePhasePoints(match.metrics, phaseId);
+    }, 0);
+    
+    return Math.round((totalPhasePoints / team.matchHistory.length) * 10) / 10;
+  };
+
+  const getMaxPointsAcrossAllTeams = () => {
+    let maxPoints = 0;
+    
+    teamAnalytics.forEach(team => {
+      team.matchHistory.forEach(match => {
+        const points = calculateMatchPoints(match.metrics);
+        if (points > maxPoints) {
+          maxPoints = points;
+        }
+      });
+    });
+    
+    return maxPoints || 100; // Default to 100 if no data
+  };
+
+  const getMatchPointsData = (team: TeamAnalytics) => {
+    // Sort matches by match number
+    const sortedMatches = [...team.matchHistory].sort((a, b) => a.matchNumber - b.matchNumber);
+    
+    // Calculate points for each match
+    const points = sortedMatches.map(match => calculateMatchPoints(match.metrics));
+    const labels = sortedMatches.map(match => `M${match.matchNumber}`);
+    
+    return { points, labels };
+  };
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
@@ -193,28 +327,79 @@ export default function AnalyticsScreen() {
           <View style={styles.teamCardExpanded}>
             <View style={styles.pointsSummary}>
               <View style={styles.pointsBox}>
-                <Text style={styles.pointsValue}>{team.totalPoints}</Text>
-                <Text style={styles.pointsLabel}>Total Points</Text>
+                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'auto').toFixed(1)}</Text>
+                <Text style={styles.pointsLabel}>Avg Auto/Match</Text>
               </View>
               <View style={styles.pointsBox}>
-                <Text style={styles.pointsValue}>{team.averagePoints.toFixed(1)}</Text>
-                <Text style={styles.pointsLabel}>Avg Points/Match</Text>
+                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'teleop').toFixed(1)}</Text>
+                <Text style={styles.pointsLabel}>Avg Teleop/Match</Text>
+              </View>
+              <View style={styles.pointsBox}>
+                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'endgame').toFixed(1)}</Text>
+                <Text style={styles.pointsLabel}>Avg Endgame/Match</Text>
               </View>
             </View>
 
-            <View style={styles.reliabilityContainer}>
-              <Text style={styles.sectionLabel}>Reliability</Text>
-              <View style={styles.reliabilityBar}>
-                <View 
-                  style={[
-                    styles.reliabilityFill, 
-                    { width: `${team.reliability * 100}%` }
-                  ]} 
-                />
-              </View>
-              <Text style={styles.reliabilityText}>
-                {(team.reliability * 100).toFixed(0)}%
-              </Text>
+            <View style={styles.progressChartContainer}>
+              <Text style={styles.sectionLabel}>Performance Progress</Text>
+              {team.matchHistory.length > 0 && (() => {
+                const { points, labels } = getMatchPointsData(team);
+                const screenWidth = Dimensions.get('window').width;
+                const maxPoints = getMaxPointsAcrossAllTeams();
+                
+                return (
+                  <LineChart
+                    data={{
+                      labels: labels,
+                      datasets: [
+                        {
+                          data: points.length > 0 ? points : [0],
+                        },
+                        {
+                          data: [0],
+                          withDots: false,
+                          strokeWidth: 0,
+                        },
+                        {
+                          data: [maxPoints],
+                          withDots: false,
+                          strokeWidth: 0,
+                        }
+                      ]
+                    }}
+                    width={screenWidth - 64}
+                    height={200}
+                    chartConfig={{
+                      backgroundColor: '#ffffff',
+                      backgroundGradientFrom: '#ffffff',
+                      backgroundGradientTo: '#ffffff',
+                      decimalPlaces: 0,
+                      color: (opacity = 1) => `rgba(30, 64, 175, ${opacity})`,
+                      labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
+                      style: {
+                        borderRadius: 16,
+                      },
+                      propsForDots: {
+                        r: '4',
+                        strokeWidth: '2',
+                        stroke: '#1e40af',
+                      },
+                      propsForBackgroundLines: {
+                        strokeDasharray: '', // solid lines
+                        stroke: '#e5e7eb',
+                        strokeWidth: 1,
+                      },
+                    }}
+                    withShadow={false}
+                    withInnerLines={true}
+                    withOuterLines={true}
+                    style={{
+                      marginVertical: 8,
+                      borderRadius: 16,
+                    }}
+                  />
+                );
+              })()}
             </View>
 
             <Text style={styles.sectionLabel}>Metrics Breakdown</Text>
@@ -249,12 +434,22 @@ export default function AnalyticsScreen() {
             <Text style={styles.sectionLabel}>Recent Matches</Text>
             {team.matchHistory.slice(-3).reverse().map(match => (
               <View key={match.id} style={styles.matchHistoryItem}>
-                <Text style={styles.matchHistoryText}>
-                  Match {match.matchNumber}
-                </Text>
-                <Text style={styles.matchHistoryDate}>
-                  {new Date(match.timestamp).toLocaleDateString()}
-                </Text>
+                <View style={styles.matchHistoryInfo}>
+                  <Text style={styles.matchHistoryText}>
+                    Match {match.matchNumber}
+                  </Text>
+                  <Text style={styles.matchHistoryDate}>
+                    {new Date(match.timestamp).toLocaleDateString()}
+                  </Text>
+                </View>
+                {dataSource === 'local' && (
+                  <TouchableOpacity
+                    onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
+                    style={styles.deleteMatchButton}
+                  >
+                    <Ionicons name="close-circle" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </View>
@@ -357,54 +552,6 @@ export default function AnalyticsScreen() {
               <TouchableOpacity
                 style={[
                   styles.sortButton,
-                  sortField === 'teamNumber' && styles.sortButtonActive,
-                ]}
-                onPress={() => toggleSort('teamNumber')}
-              >
-                <Text
-                  style={[
-                    styles.sortButtonText,
-                    sortField === 'teamNumber' && styles.sortButtonTextActive,
-                  ]}
-                >
-                  Team #
-                </Text>
-                {sortField === 'teamNumber' && (
-                  <Ionicons
-                    name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
-                    size={16}
-                    color="white"
-                  />
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.sortButton,
-                  sortField === 'matchCount' && styles.sortButtonActive,
-                ]}
-                onPress={() => toggleSort('matchCount')}
-              >
-                <Text
-                  style={[
-                    styles.sortButtonText,
-                    sortField === 'matchCount' && styles.sortButtonTextActive,
-                  ]}
-                >
-                  Matches
-                </Text>
-                {sortField === 'matchCount' && (
-                  <Ionicons
-                    name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
-                    size={16}
-                    color="white"
-                  />
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.sortButton,
                   sortField === 'avgScore' && styles.sortButtonActive,
                 ]}
                 onPress={() => toggleSort('avgScore')}
@@ -418,6 +565,78 @@ export default function AnalyticsScreen() {
                   Score
                 </Text>
                 {sortField === 'avgScore' && (
+                  <Ionicons
+                    name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
+                    size={16}
+                    color="white"
+                  />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortField === 'avgAuto' && styles.sortButtonActive,
+                ]}
+                onPress={() => toggleSort('avgAuto')}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortField === 'avgAuto' && styles.sortButtonTextActive,
+                  ]}
+                >
+                  Auto
+                </Text>
+                {sortField === 'avgAuto' && (
+                  <Ionicons
+                    name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
+                    size={16}
+                    color="white"
+                  />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortField === 'avgTeleop' && styles.sortButtonActive,
+                ]}
+                onPress={() => toggleSort('avgTeleop')}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortField === 'avgTeleop' && styles.sortButtonTextActive,
+                  ]}
+                >
+                  Teleop
+                </Text>
+                {sortField === 'avgTeleop' && (
+                  <Ionicons
+                    name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
+                    size={16}
+                    color="white"
+                  />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sortButton,
+                  sortField === 'avgEndgame' && styles.sortButtonActive,
+                ]}
+                onPress={() => toggleSort('avgEndgame')}
+              >
+                <Text
+                  style={[
+                    styles.sortButtonText,
+                    sortField === 'avgEndgame' && styles.sortButtonTextActive,
+                  ]}
+                >
+                  Endgame
+                </Text>
+                {sortField === 'avgEndgame' && (
                   <Ionicons
                     name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
                     size={16}
@@ -465,7 +684,6 @@ const styles = {
     borderRadius: 10,
     padding: 4,
     marginHorizontal: 16,
-    marginTop: 8,
     marginBottom: 8,
   },
   segmentButton: {
@@ -667,24 +885,8 @@ const styles = {
     marginTop: 12,
     marginBottom: 8,
   },
-  reliabilityContainer: {
+  progressChartContainer: {
     marginBottom: 8,
-  },
-  reliabilityBar: {
-    height: 8,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 4,
-    overflow: 'hidden' as const,
-    marginTop: 4,
-  },
-  reliabilityFill: {
-    height: 8,
-    backgroundColor: '#10b981',
-  },
-  reliabilityText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 4,
   },
   metricRow: {
     marginBottom: 12,
@@ -710,9 +912,13 @@ const styles = {
   matchHistoryItem: {
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
+  },
+  matchHistoryInfo: {
+    flex: 1,
   },
   matchHistoryText: {
     fontSize: 14,
@@ -721,6 +927,10 @@ const styles = {
   matchHistoryDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  deleteMatchButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   footer: {
     padding: 16,
