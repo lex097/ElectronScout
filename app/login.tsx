@@ -56,15 +56,15 @@ export default function LoginScreen() {
       } else {
         // Team doesn't exist - create it
         try {
-          const { teamId, teamCode } = await authService.createTeam(teamNum);
+          const { teamCode, adminCode } = await authService.createTeam(teamNum);
           
-          // Navigate to admin code creation screen
+          // Navigate to team created screen with codes (team_code + auto-generated admin_code)
           router.push({
-            pathname: '/create-admin-code' as any,
+            pathname: '/team-created' as any,
             params: {
-              teamId: teamId,
               teamCode: teamCode,
               teamNumber: teamNumber,
+              adminCode: adminCode,
             },
           });
         } catch (createError) {

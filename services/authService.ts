@@ -119,16 +119,21 @@ export class AuthService {
   /**
    * Create a new team and return team_id and generated team_code
    */
-  async createTeam(teamNumber: number, teamName?: string): Promise<{ teamId: string; teamCode: string }> {
+  async createTeam(
+    teamNumber: number,
+    teamName?: string
+  ): Promise<{ teamId: string; teamCode: string; adminCode: string }> {
     try {
       // Insert new team (trigger will auto-generate team_code)
+      const adminCode = this.generateAdminCode();
       const { data: newTeam, error: insertError } = await this.getSupabaseClient()
         .from('teams')
         .insert({
           team_number: teamNumber,
           team_name: teamName || `Team ${teamNumber}`,
+          admin_code: adminCode,
         })
-        .select('id, team_code')
+        .select('id, team_code, admin_code')
         .single();
 
       if (insertError || !newTeam) {
@@ -142,7 +147,7 @@ export class AuthService {
         
         const { data: teamData, error: fetchError } = await this.getSupabaseClient()
           .from('teams')
-          .select('team_code')
+          .select('team_code, admin_code')
           .eq('id', newTeam.id)
           .single();
 
@@ -153,12 +158,14 @@ export class AuthService {
         return {
           teamId: newTeam.id,
           teamCode: teamData.team_code,
+          adminCode: teamData.admin_code || adminCode,
         };
       }
 
       return {
         teamId: newTeam.id,
         teamCode: newTeam.team_code,
+        adminCode: newTeam.admin_code || adminCode,
       };
     } catch (error) {
       console.error('Error creating team:', error);
@@ -190,10 +197,15 @@ export class AuthService {
   }
 
   /**
-   * Validate admin code format (4 digits)
+   * Validate admin code format (6 digits)
    */
   private validateAdminCodeFormat(adminCode: string): boolean {
-    return /^[0-9]{4}$/.test(adminCode);
+    return /^[0-9]{6}$/.test(adminCode);
+  }
+
+  private generateAdminCode(): string {
+    const n = Math.floor(Math.random() * 1_000_000);
+    return String(n).padStart(6, '0');
   }
 
   /**
@@ -203,7 +215,7 @@ export class AuthService {
     try {
       // Validate format
       if (!this.validateAdminCodeFormat(adminCode)) {
-        throw new Error('Admin code must be exactly 4 digits');
+        throw new Error('Admin code must be exactly 6 digits');
       }
 
       // Update teams table with admin_code

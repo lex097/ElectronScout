@@ -170,6 +170,29 @@ export class SupabaseSyncService {
   }
 
   /**
+   * Check which match IDs have been admin-deleted (tombstoned) for this team.
+   */
+  private async getDeletedMatchIds(teamId: string, matchIds: string[]): Promise<Set<string>> {
+    if (matchIds.length === 0) return new Set();
+    try {
+      const { data, error } = await this.getSupabaseClient()
+        .from('match_deletions')
+        .select('match_id')
+        .eq('team_id', teamId)
+        .in('match_id', matchIds);
+
+      if (error) {
+        // If RLS prevents reads, we can't filter; allow upload attempt.
+        return new Set();
+      }
+
+      return new Set((data || []).map((r: any) => String(r.match_id)));
+    } catch {
+      return new Set();
+    }
+  }
+
+  /**
    * Insert a single match
    */
   async insertMatch(match: {
@@ -189,6 +212,13 @@ export class SupabaseSyncService {
       if (!teamId) {
         console.error('Cannot insert: No team context');
         return false;
+      }
+
+      // If this match was admin-deleted, don't resurrect it; treat as "synced" so it clears locally.
+      const deleted = await this.getDeletedMatchIds(teamId, [match.id]);
+      if (deleted.has(match.id)) {
+        console.log('Skipping upload for admin-deleted match:', match.id);
+        return true;
       }
 
       const scoutName = match.scout_name || await this.getScoutName();
@@ -249,28 +279,32 @@ export class SupabaseSyncService {
     timestamp: number;
     event_id?: string;
     scout_name?: string;
-  }>): Promise<{ success: number; failed: number }> {
+  }>): Promise<{ insertedIds: string[]; skippedDeletedIds: string[]; failedIds: string[] }> {
     try {
       const teamId = await this.getTeamId();
       if (!teamId) {
         console.error('Cannot batch insert: No team context');
-        return { success: 0, failed: matches.length };
+        return { insertedIds: [], skippedDeletedIds: [], failedIds: matches.map(m => m.id) };
       }
 
       const scoutName = await this.getScoutName();
       if (!scoutName) {
         console.error('Cannot batch insert: No scout name');
-        return { success: 0, failed: matches.length };
+        return { insertedIds: [], skippedDeletedIds: [], failedIds: matches.map(m => m.id) };
       }
 
       const batchSize = 100;
-      let successCount = 0;
-      let failedCount = 0;
+      const insertedIds: string[] = [];
+      const failedIds: string[] = [];
+      const skippedDeletedIds: string[] = [];
 
       for (let i = 0; i < matches.length; i += batchSize) {
         const batch = matches.slice(i, i + batchSize);
+        const deletedSet = await this.getDeletedMatchIds(teamId, batch.map(b => b.id));
+        const filteredBatch = batch.filter(b => !deletedSet.has(b.id));
+        skippedDeletedIds.push(...batch.filter(b => deletedSet.has(b.id)).map(b => b.id));
         
-        const insertData = batch.map(m => ({
+        const insertData = filteredBatch.map(m => ({
           id: m.id,
           team_id: teamId, // team_id = the scouting team (team that submitted this data)
           event_id: m.event_id || null,
@@ -284,7 +318,11 @@ export class SupabaseSyncService {
           timestamp: m.timestamp,
         }));
         
-        console.log(`Batch inserting ${batch.length} matches with team_id:`, teamId);
+        if (insertData.length === 0) {
+          continue;
+        }
+        
+        console.log(`Batch inserting ${insertData.length} matches with team_id:`, teamId);
         
       // console.log('Batch inserting to Supabase:', 
       //   insertData.map(d => ({ 
@@ -300,22 +338,20 @@ export class SupabaseSyncService {
       const { data, error } = await this.getSupabaseClient()
         .from('matches')
         .insert(insertData)
-        .select('id, calculated_points');
+        .select('id');
 
         if (error) {
           console.error('Batch insert error:', error);
-          failedCount += batch.length;
+          failedIds.push(...insertData.map(d => d.id));
         } else {
-          // console.log('Supabase returned:', data);
-          // console.log('Inserted calculated_points:', data?.map(d => ({ id: d.id, calculated_points: d.calculated_points })));
-          successCount += batch.length;
+          insertedIds.push(...((data || []) as any[]).map((d) => String(d.id)));
         }
       }
 
-      return { success: successCount, failed: failedCount };
+      return { insertedIds, skippedDeletedIds, failedIds };
     } catch (error) {
       console.error('Batch insert failed:', error);
-      return { success: 0, failed: matches.length };
+      return { insertedIds: [], skippedDeletedIds: [], failedIds: matches.map(m => m.id) };
     }
   }
 
