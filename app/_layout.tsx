@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -69,21 +70,23 @@ function RootLayoutNav() {
   }, [isAuthenticated, user, isLoading]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="login" />
-          <Stack.Screen name="verify-team-code" />
-          <Stack.Screen name="create-admin-code" />
-          <Stack.Screen name="team-created" />
-          <Stack.Screen name="select-event" />
-          <Stack.Screen name="select-match" />
-          <Stack.Screen name="select-team" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="(admin)" />
-          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        </Stack>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="login" />
+            <Stack.Screen name="verify-team-code" />
+            <Stack.Screen name="create-admin-code" />
+            <Stack.Screen name="team-created" />
+            <Stack.Screen name="select-event" />
+            <Stack.Screen name="select-match" />
+            <Stack.Screen name="select-team" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="(admin)" />
+            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+          </Stack>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

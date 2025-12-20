@@ -435,12 +435,12 @@ export default function AnalyticsScreen() {
             {team.matchHistory.slice(-3).reverse().map(match => (
               <View key={match.id} style={styles.matchHistoryItem}>
                 <View style={styles.matchHistoryInfo}>
-                  <Text style={styles.matchHistoryText}>
-                    Match {match.matchNumber}
-                  </Text>
-                  <Text style={styles.matchHistoryDate}>
-                    {new Date(match.timestamp).toLocaleDateString()}
-                  </Text>
+                <Text style={styles.matchHistoryText}>
+                  Match {match.matchNumber}
+                </Text>
+                <Text style={styles.matchHistoryDate}>
+                  {new Date(match.timestamp).toLocaleDateString()}
+                </Text>
                 </View>
                 {dataSource === 'local' && (
                   <TouchableOpacity
