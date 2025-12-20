@@ -357,13 +357,6 @@ export default function MatchScoutScreen() {
           </View>
         )}
 
-        {/* Duplicate Warning */}
-        {duplicateWarning && (
-          <View style={styles.warningContainer}>
-            <Text style={styles.warningText}>{duplicateWarning}</Text>
-          </View>
-        )}
-
         {/* Phase Tabs */}
         <View style={styles.phaseTabs}>
           {ACTIVE_GAME_CONFIG.phases.map((phase, index) => (
