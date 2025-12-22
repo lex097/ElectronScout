@@ -383,6 +383,7 @@ export class SupabaseSyncService {
 
   /**
    * Fetch all matches for current team
+   * Filters out admin-deleted matches using match_deletions tombstone table
    */
   async getMatches(eventId?: string): Promise<any[]> {
     try {
@@ -392,24 +393,40 @@ export class SupabaseSyncService {
         return [];
       }
 
-      let query = this.getSupabaseClient()
+      // Build matches query
+      let matchesQuery = this.getSupabaseClient()
         .from('matches')
         .select('*')
         .eq('team_id', teamId)
         .order('match_number', { ascending: true });
 
       if (eventId) {
-        query = query.eq('event_id', eventId);
+        matchesQuery = matchesQuery.eq('event_id', eventId);
       }
 
-      const { data, error } = await query;
+      // Fetch both matches and deletion tombstones in parallel
+      const [{ data, error }, { data: deletionsData, error: deletionsError }] = await Promise.all([
+        matchesQuery,
+        this.getSupabaseClient()
+          .from('match_deletions')
+          .select('match_id')
+          .eq('team_id', teamId),
+      ]);
 
       if (error) {
         console.error('Fetch error:', error);
         return [];
       }
 
-      return data || [];
+      if (!data) return [];
+
+      // Filter out admin-deleted matches if we successfully fetched deletions
+      if (!deletionsError && deletionsData) {
+        const deletedMatchIds = new Set((deletionsData || []).map((d: any) => String(d.match_id)));
+        return data.filter((m: any) => !deletedMatchIds.has(String(m.id)));
+      }
+
+      return data;
     } catch (error) {
       console.error('Fetch failed:', error);
       return [];
@@ -450,6 +467,7 @@ export class SupabaseSyncService {
    * Fetch all matches submitted by the current team (filtered by team_id)
    * Only returns matches where team_id matches the logged-in user's team
    * Returns matches in MatchData format for analytics
+   * Filters out admin-deleted matches using match_deletions tombstone table
    */
   async getAllTeamMatches(): Promise<Array<{
     id: string;
@@ -471,21 +489,36 @@ export class SupabaseSyncService {
       
       console.log('Fetching matches for team_id:', teamId);
       
-      const { data, error } = await this.getSupabaseClient()
-        .from('matches')
-        .select('*')
-        .eq('team_id', teamId) // Only get matches submitted by this team
-        .order('timestamp', { ascending: false });
+      // Fetch both matches and deletion tombstones in parallel
+      const [{ data: matchesData, error: matchesError }, { data: deletionsData, error: deletionsError }] =
+        await Promise.all([
+          this.getSupabaseClient()
+            .from('matches')
+            .select('*')
+            .eq('team_id', teamId) // Only get matches submitted by this team
+            .order('timestamp', { ascending: false }),
+          this.getSupabaseClient()
+            .from('match_deletions')
+            .select('match_id')
+            .eq('team_id', teamId),
+        ]);
       
-      if (error) {
-        console.error('Failed to fetch team matches:', error);
+      if (matchesError) {
+        console.error('Failed to fetch team matches:', matchesError);
         return [];
       }
       
-      if (!data) return [];
+      if (!matchesData) return [];
+      
+      // Filter out admin-deleted matches if we successfully fetched deletions
+      let matchesToReturn = matchesData;
+      if (!deletionsError && deletionsData) {
+        const deletedMatchIds = new Set((deletionsData || []).map((d: any) => String(d.match_id)));
+        matchesToReturn = matchesData.filter((m: any) => !deletedMatchIds.has(String(m.id)));
+      }
       
       // Transform Supabase format to MatchData format
-      return data.map(match => ({
+      return matchesToReturn.map((match: any) => ({
         id: match.id,
         matchNumber: match.match_number,
         teamNumber: match.team_number,
