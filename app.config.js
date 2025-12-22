@@ -2,7 +2,9 @@ export default {
   expo: {
     extra: {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
-      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      // TBA API Key: Get your free API key from https://www.thebluealliance.com/account
+      tbaApiKey: process.env.EXPO_PUBLIC_TBA_API_KEY
     },
     name: "ElectronScout",
     slug: "ElectronScout",
