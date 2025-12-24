@@ -83,7 +83,6 @@ function RootLayoutNav() {
             <Stack.Screen name="select-team" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="(admin)" />
-            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
           </Stack>
         </ThemeProvider>
       </QueryClientProvider>

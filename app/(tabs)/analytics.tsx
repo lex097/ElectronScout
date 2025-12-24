@@ -382,11 +382,11 @@ export default function AnalyticsScreen() {
                       propsForDots: {
                         r: '4',
                         strokeWidth: '2',
-                        stroke: '#1e40af',
+                        stroke: '#ff6600',
                       },
                       propsForBackgroundLines: {
                         strokeDasharray: '', // solid lines
-                        stroke: '#e5e7eb',
+                        stroke: '#404040',
                         strokeWidth: 1,
                       },
                     }}
@@ -458,7 +458,7 @@ export default function AnalyticsScreen() {
         <Ionicons
           name={isExpanded ? 'chevron-up' : 'chevron-down'}
           size={20}
-          color="#6b7280"
+          color="#b0b0b0"
           style={styles.expandIcon}
         />
       </TouchableOpacity>
@@ -467,9 +467,9 @@ export default function AnalyticsScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1e40af" />
+          <ActivityIndicator size="large" color="#ff6600" />
           <Text style={styles.loadingText}>Loading analytics...</Text>
         </View>
       </SafeAreaView>
@@ -477,7 +477,7 @@ export default function AnalyticsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* Segmented Control */}
       <View style={styles.segmentedControl}>
         <TouchableOpacity
@@ -518,6 +518,7 @@ export default function AnalyticsScreen() {
 
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />
         }
@@ -676,11 +677,11 @@ export default function AnalyticsScreen() {
 const styles = {
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   segmentedControl: {
     flexDirection: 'row' as const,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#404040',
     borderRadius: 10,
     padding: 4,
     marginHorizontal: 16,
@@ -701,7 +702,7 @@ const styles = {
     borderBottomRightRadius: 8,
   },
   segmentButtonActive: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -711,13 +712,16 @@ const styles = {
   segmentButtonText: {
     fontSize: 15,
     fontWeight: '600' as const,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   segmentButtonTextActive: {
-    color: '#1e40af',
+    color: '#ff6600',
   },
   scrollView: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 0,
   },
   loadingContainer: {
     flex: 1,
@@ -727,7 +731,7 @@ const styles = {
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   statsHeader: {
     flexDirection: 'row' as const,
@@ -736,7 +740,7 @@ const styles = {
   },
   statBox: {
     flex: 1,
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     padding: 16,
     borderRadius: 12,
     alignItems: 'center' as const,
@@ -744,11 +748,11 @@ const styles = {
   statNumber: {
     fontSize: 28,
     fontWeight: 'bold' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   statLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginTop: 4,
   },
   emptyState: {
@@ -761,12 +765,12 @@ const styles = {
   emptyTitle: {
     fontSize: 24,
     fontWeight: 'bold' as const,
-    color: '#1f2937',
+    color: '#fff',
     marginTop: 16,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center' as const,
     marginTop: 8,
   },
@@ -780,24 +784,24 @@ const styles = {
   sortLabel: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   sortButton: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#404040',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
     gap: 4,
   },
   sortButtonActive: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
   },
   sortButtonText: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   sortButtonTextActive: {
     color: 'white',
@@ -807,7 +811,7 @@ const styles = {
     gap: 12,
   },
   teamCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -827,11 +831,11 @@ const styles = {
   teamNumber: {
     fontSize: 20,
     fontWeight: 'bold' as const,
-    color: '#1f2937',
+    color: '#fff',
   },
   teamMatches: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginTop: 2,
   },
   teamCardRight: {
@@ -840,11 +844,11 @@ const styles = {
   compositeScore: {
     fontSize: 28,
     fontWeight: 'bold' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   compositeLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   expandIcon: {
     alignSelf: 'center' as const,
@@ -854,7 +858,7 @@ const styles = {
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: '#404040',
   },
   pointsSummary: {
     flexDirection: 'row' as const,
@@ -863,7 +867,7 @@ const styles = {
   },
   pointsBox: {
     flex: 1,
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#3a3a3a',
     padding: 12,
     borderRadius: 8,
     alignItems: 'center' as const,
@@ -871,17 +875,17 @@ const styles = {
   pointsValue: {
     fontSize: 24,
     fontWeight: 'bold' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   pointsLabel: {
     fontSize: 11,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginTop: 2,
   },
   sectionLabel: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#e5e5e5',
     marginTop: 12,
     marginBottom: 8,
   },
@@ -894,7 +898,7 @@ const styles = {
   metricName: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#e5e5e5',
     marginBottom: 4,
   },
   metricStats: {
@@ -907,7 +911,7 @@ const styles = {
   statValue: {
     fontSize: 18,
     fontWeight: 'bold' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   matchHistoryItem: {
     flexDirection: 'row' as const,
@@ -915,18 +919,18 @@ const styles = {
     alignItems: 'center' as const,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: '#404040',
   },
   matchHistoryInfo: {
     flex: 1,
   },
   matchHistoryText: {
     fontSize: 14,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   matchHistoryDate: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   deleteMatchButton: {
     padding: 4,
@@ -934,12 +938,13 @@ const styles = {
   },
   footer: {
     padding: 16,
+    paddingBottom: 16,
   },
   syncButton: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingVertical: 12,
     borderRadius: 10,
     gap: 8,

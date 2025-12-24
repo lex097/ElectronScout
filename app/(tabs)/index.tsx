@@ -262,7 +262,10 @@ export default function MatchScoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+      >
         {/* Match Info */}
         {isTBAMode ? (
           <View style={styles.tbaInfoContainer}>
@@ -415,10 +418,10 @@ export default function MatchScoutScreen() {
 const styles = {
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 16,
     alignItems: 'center' as const,
   },
@@ -427,13 +430,17 @@ const styles = {
     fontWeight: 'bold' as const,
     color: 'white',
   },
-  content: {
+  scrollView: {
     flex: 1,
+  },
+  content: {
     padding: 16,
+    paddingBottom: 0,
   },
   matchInfo: {
     flexDirection: 'row' as const,
     gap: 12,
+    marginTop: 16,
     marginBottom: 16,
   },
   inputGroup: {
@@ -443,15 +450,16 @@ const styles = {
     fontSize: 14,
     fontWeight: '600' as const,
     marginBottom: 6,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#404040',
+    color: '#fff',
   },
   phaseTabs: {
     flexDirection: 'row' as const,
@@ -460,27 +468,27 @@ const styles = {
   },
   phaseTab: {
     flex: 1,
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     padding: 12,
     borderRadius: 8,
     alignItems: 'center' as const,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   phaseTabActive: {
-    backgroundColor: '#1e40af',
-    borderColor: '#1e40af',
+    backgroundColor: '#ff6600',
+    borderColor: '#ff6600',
   },
   phaseTabText: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   phaseTabTextActive: {
     color: 'white',
   },
   metricsSection: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -489,7 +497,7 @@ const styles = {
     fontSize: 18,
     fontWeight: 'bold' as const,
     marginBottom: 16,
-    color: '#1f2937',
+    color: '#fff',
   },
   metricContainer: {
     marginBottom: 20,
@@ -498,7 +506,7 @@ const styles = {
     fontSize: 16,
     fontWeight: '600' as const,
     marginBottom: 8,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   counterContainer: {
     flexDirection: 'row' as const,
@@ -506,7 +514,7 @@ const styles = {
     gap: 12,
   },
   counterButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     width: 60,
     height: 60,
     borderRadius: 30,
@@ -520,7 +528,7 @@ const styles = {
   },
   counterValue: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#2a2a2a',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center' as const,
@@ -528,15 +536,15 @@ const styles = {
   counterValueText: {
     fontSize: 32,
     fontWeight: 'bold' as const,
-    color: '#1f2937',
+    color: '#fff',
   },
   maxLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginTop: 4,
   },
   booleanButton: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#404040',
     padding: 20,
     borderRadius: 8,
     marginBottom: 12,
@@ -548,7 +556,7 @@ const styles = {
   booleanButtonText: {
     fontSize: 18,
     fontWeight: '600' as const,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   booleanButtonTextActive: {
     color: 'white',
@@ -559,21 +567,21 @@ const styles = {
   selectOptionButton: {
     flex: 1,
     minWidth: '30%',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#2a2a2a',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center' as const,
     borderWidth: 2,
-    borderColor: '#93c5fd',
+    borderColor: '#ff9940',
   },
   selectOptionButtonActive: {
-    backgroundColor: '#1e40af',
-    borderColor: '#1e40af',
+    backgroundColor: '#ff6600',
+    borderColor: '#ff6600',
   },
   selectOptionButtonText: {
     fontSize: 16,
     fontWeight: '600' as const,
-    color: '#1e3a8a',
+    color: '#ff9940',
   },
   selectOptionButtonTextActive: {
     color: 'white',
@@ -582,21 +590,22 @@ const styles = {
     marginBottom: 16,
   },
   notesInput: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
     fontSize: 14,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#404040',
     minHeight: 80,
     textAlignVertical: 'top' as const,
+    color: '#fff',
   },
   saveButton: {
     backgroundColor: '#10b981',
     padding: 20,
     borderRadius: 12,
     alignItems: 'center' as const,
-    marginBottom: 32,
+    marginBottom: 16,
   },
   saveButtonDisabled: {
     opacity: 0.5,
@@ -610,7 +619,7 @@ const styles = {
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
     alignItems: 'center' as const,
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
@@ -621,18 +630,18 @@ const styles = {
   toggleLabel: {
     fontSize: 16,
     fontWeight: '600' as const,
-    color: '#1f2937',
+    color: '#fff',
     marginBottom: 4,
   },
   toggleSubtext: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   tbaInfoContainer: {
     marginBottom: 16,
   },
   tbaInfoCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -640,18 +649,18 @@ const styles = {
   tbaInfoLabel: {
     fontSize: 12,
     fontWeight: '600' as const,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginBottom: 4,
     textTransform: 'uppercase' as const,
   },
   tbaInfoValue: {
     fontSize: 18,
     fontWeight: '600' as const,
-    color: '#1f2937',
+    color: '#fff',
     marginBottom: 12,
   },
   changeButton: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#3a3a3a',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 6,
@@ -660,10 +669,10 @@ const styles = {
   changeButtonText: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   selectButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -675,7 +684,7 @@ const styles = {
     color: 'white',
   },
   selectMatchButton: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#3a3a3a',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -685,6 +694,6 @@ const styles = {
   selectMatchButtonText: {
     fontSize: 14,
     fontWeight: '600' as const,
-    color: '#1e40af',
+    color: '#ff6600',
   },
 };

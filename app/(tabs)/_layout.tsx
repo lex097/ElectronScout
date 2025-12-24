@@ -41,6 +41,16 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarInactiveTintColor: '#888',
+        tabBarStyle: {
+          backgroundColor: '#1a1a1a',
+          borderTopWidth: 0,
+          elevation: 0,
+        },
+        headerStyle: {
+          backgroundColor: '#1a1a1a',
+        },
+        headerTintColor: '#fff',
         // Disable the static render of the header on web
         // to prevent a hydration error in React Navigation v6.
         headerShown: useClientOnlyValue(false, true),
@@ -49,7 +59,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Match Scouting',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
           headerLeft: () => (
             <Pressable
               onPress={handleLogout}
@@ -71,7 +81,7 @@ export default function TabLayout() {
         name="analytics"
         options={{
           title: 'Analytics',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart" color={color} />,
           headerLeft: () => (
             <Pressable
               onPress={handleLogout}
