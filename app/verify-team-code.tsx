@@ -6,10 +6,12 @@ import { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Keyboard,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -70,44 +72,47 @@ export default function VerifyTeamCodeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Enter Team Code</Text>
-        <Text style={styles.subtitle}>
-          Enter your team's 6-character code to continue
-        </Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.content}>
+          <Text style={styles.title}>Enter Team Code</Text>
+          <Text style={styles.subtitle}>
+            Enter your team's 6-character code to continue
+          </Text>
 
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Team Code</Text>
-            <TextInput
-              style={[styles.input, error && styles.inputError]}
-              value={teamCode}
-              onChangeText={(text) => {
-                setTeamCode(text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
-                setError(null);
-              }}
-              placeholder="ABC123"
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={6}
-              editable={!isLoading}
-            />
-            {error && <Text style={styles.errorText}>{error}</Text>}
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Team Code</Text>
+              <TextInput
+                style={[styles.input, error && styles.inputError]}
+                value={teamCode}
+                onChangeText={(text) => {
+                  setTeamCode(text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                  setError(null);
+                }}
+                placeholder="ABC123"
+                placeholderTextColor="#888"
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={6}
+                editable={!isLoading}
+              />
+              {error && <Text style={styles.errorText}>{error}</Text>}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, isLoading && styles.buttonDisabled]}
+              onPress={handleVerify}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Verify</Text>
+              )}
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleVerify}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Verify</Text>
-            )}
-          </TouchableOpacity>
         </View>
-      </View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 }
@@ -115,7 +120,7 @@ export default function VerifyTeamCodeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   content: {
     flex: 1,
@@ -127,13 +132,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 48,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   form: {
     width: '100%',
@@ -145,10 +150,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
     fontSize: 24,
@@ -156,8 +161,9 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#404040',
     textTransform: 'uppercase',
+    color: '#fff',
   },
   inputError: {
     borderColor: '#ef4444',
@@ -168,7 +174,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   button: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',

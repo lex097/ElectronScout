@@ -118,6 +118,7 @@ export default function CreateAdminCodeScreen() {
                 value={adminCode}
                 onChangeText={handleAdminCodeChange}
                 placeholder="0000"
+                placeholderTextColor="#888"
                 keyboardType="number-pad"
                 maxLength={4}
                 editable={!isLoading}
@@ -135,6 +136,7 @@ export default function CreateAdminCodeScreen() {
                 value={confirmCode}
                 onChangeText={handleConfirmCodeChange}
                 placeholder="0000"
+                placeholderTextColor="#888"
                 keyboardType="number-pad"
                 maxLength={4}
                 editable={!isLoading}
@@ -171,7 +173,7 @@ export default function CreateAdminCodeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   content: {
     flex: 1,
@@ -183,13 +185,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 48,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   form: {
     width: '100%',
@@ -201,10 +203,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
     fontSize: 24,
@@ -212,8 +214,9 @@ const styles = StyleSheet.create({
     letterSpacing: 8,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#404040',
     fontFamily: 'monospace',
+    color: '#fff',
   },
   inputError: {
     borderColor: '#ef4444',
@@ -224,7 +227,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   button: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',

@@ -100,6 +100,7 @@ export default function LoginScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Enter name"
+                placeholderTextColor="#888"
                 autoCapitalize="none"
                 autoCorrect={false}
                 editable={!isLoading}
@@ -108,7 +109,6 @@ export default function LoginScreen() {
                   // Focus next input or dismiss keyboard
                   Keyboard.dismiss();
                 }}
-                blurOnSubmit={false}
               />
             </View>
 
@@ -119,6 +119,7 @@ export default function LoginScreen() {
                 value={teamNumber}
                 onChangeText={setTeamNumber}
                 placeholder="Enter team number"
+                placeholderTextColor="#888"
                 keyboardType="number-pad"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -130,7 +131,6 @@ export default function LoginScreen() {
                     handleContinue();
                   }
                 }}
-                blurOnSubmit={true}
               />
             </View>
 
@@ -157,7 +157,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   content: {
     flex: 1,
@@ -169,13 +169,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
-    color: '#1e40af',
+    color: '#ff6600',
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 48,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   form: {
     width: '100%',
@@ -187,15 +187,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
-    color: '#374151',
+    color: '#e5e5e5',
   },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: '#404040',
+    color: '#fff',
   },
   buttonContainer: {
     marginTop: 24,
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   continueButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
   },
   buttonText: {
     color: 'white',

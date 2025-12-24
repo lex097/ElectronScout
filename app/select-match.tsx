@@ -101,7 +101,7 @@ export default function SelectMatchScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1e40af" />
+          <ActivityIndicator size="large" color="#ff6600" />
           <Text style={styles.loadingText}>Loading matches...</Text>
         </View>
       </SafeAreaView>
@@ -158,7 +158,7 @@ export default function SelectMatchScreen() {
         <TextInput
           style={styles.searchInput}
           placeholder="Search by match number..."
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#888"
           value={searchQuery}
           onChangeText={setSearchQuery}
           keyboardType="number-pad"
@@ -229,10 +229,10 @@ export default function SelectMatchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 20,
     alignItems: 'center',
   },
@@ -247,18 +247,18 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.9)',
   },
   searchContainer: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#404040',
   },
   searchInput: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#1a1a1a',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: '#1f2937',
+    color: '#fff',
   },
   loadingContainer: {
     flex: 1,
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   errorContainer: {
     flex: 1,
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -297,17 +297,17 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#fff',
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center',
     marginBottom: 24,
   },
   backButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   sectionHeader: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#404040',
     padding: 12,
     marginTop: 8,
     marginBottom: 8,
@@ -330,10 +330,10 @@ const styles = StyleSheet.create({
   sectionHeaderText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#374151',
+    color: '#e5e5e5',
   },
   matchCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -352,11 +352,11 @@ const styles = StyleSheet.create({
   matchNumber: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#fff',
   },
   matchTime: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   alliancePreview: {
     flexDirection: 'row',
@@ -364,20 +364,20 @@ const styles = StyleSheet.create({
   },
   allianceBadge: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#3a3a3a',
     padding: 8,
     borderRadius: 6,
   },
   allianceLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginBottom: 4,
   },
   allianceTeams: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#fff',
   },
 });
 

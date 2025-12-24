@@ -3,11 +3,11 @@ import { useEventMatches } from '@/hooks/useEventMatches';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -44,7 +44,7 @@ export default function SelectTeamScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1e40af" />
+          <ActivityIndicator size="large" color="#ff6600" />
           <Text style={styles.loadingText}>Loading match details...</Text>
         </View>
       </SafeAreaView>
@@ -123,10 +123,10 @@ export default function SelectTeamScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 20,
     alignItems: 'center',
   },
@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   content: {
     flex: 1,
@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   allianceTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#fff',
   },
   teamGrid: {
     flexDirection: 'row',
@@ -196,19 +196,19 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   redTeamCard: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: '#3a2a2a',
     borderWidth: 2,
     borderColor: '#ef4444',
   },
   blueTeamCard: {
-    backgroundColor: '#dbeafe',
+    backgroundColor: '#2a2a3a',
     borderWidth: 2,
     borderColor: '#3b82f6',
   },
   teamNumber: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#fff',
   },
 });
 

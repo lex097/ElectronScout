@@ -74,7 +74,7 @@ export default function SelectEventScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1e40af" />
+          <ActivityIndicator size="large" color="#ff6600" />
           <Text style={styles.loadingText}>Loading events...</Text>
         </View>
       </SafeAreaView>
@@ -131,7 +131,7 @@ export default function SelectEventScreen() {
         <TextInput
           style={styles.searchInput}
           placeholder="Search events by name, location, or code..."
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#888"
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCapitalize="none"
@@ -175,10 +175,10 @@ export default function SelectEventScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     padding: 20,
     alignItems: 'center',
   },
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   errorContainer: {
     flex: 1,
@@ -216,12 +216,12 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center',
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -240,17 +240,17 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#fff',
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center',
     marginBottom: 24,
   },
   backButton: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -261,24 +261,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   searchContainer: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#404040',
   },
   searchInput: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#1a1a1a',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: '#1f2937',
+    color: '#fff',
   },
   listContent: {
     padding: 16,
   },
   eventCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -298,26 +298,26 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#fff',
     marginRight: 8,
   },
   eventCode: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1e40af',
-    backgroundColor: '#eff6ff',
+    color: '#ff6600',
+    backgroundColor: '#3a3a3a',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
   },
   eventLocation: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     marginBottom: 4,
   },
   eventDates: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#888',
   },
 });
 

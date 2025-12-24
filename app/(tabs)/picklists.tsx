@@ -509,7 +509,10 @@ export default function PicklistsScreen() {
         {/* Top Section: Ranked Teams List */}
         <View style={[styles.topSection, { height: topSectionHeight }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Ranked Teams</Text>
+            <View style={styles.sectionHeaderLeft}>
+              <Text style={styles.sectionTitle}>Ranked Teams</Text>
+              <Text style={styles.hintText}>Hold down on a team to add to picklist</Text>
+            </View>
             <TouchableOpacity onPress={() => loadData(true)}>
               <Ionicons name="refresh" size={24} color="#ff6600" />
             </TouchableOpacity>
@@ -596,10 +599,19 @@ const styles = {
     borderBottomWidth: 1,
     borderBottomColor: '#404040',
   },
+  sectionHeaderLeft: {
+    flex: 1,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold' as const,
     color: '#fff',
+    marginBottom: 4,
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic' as const,
   },
   bottomSection: {
     backgroundColor: '#1a1a1a',
