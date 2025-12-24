@@ -27,6 +27,14 @@ export default function AdminLayout() {
         options={{
           title: 'Admin Dashboard',
           headerShown: true,
+          headerStyle: {
+            backgroundColor: '#1a1a1a',
+          },
+          headerTintColor: '#fff',
+          headerTitleStyle: {
+            color: '#ff6600',
+            fontWeight: 'bold',
+          },
         }}
       />
     </Stack>

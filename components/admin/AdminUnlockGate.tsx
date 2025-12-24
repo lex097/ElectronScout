@@ -1,9 +1,9 @@
 import { AdminCodeInput } from '@/components/admin/AdminCodeInput';
 import { adminService } from '@/services/adminService';
-import { useAuthStore } from '@/stores/authStore';
 import { useAdminStore } from '@/stores/adminStore';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, AppStateStatus, StyleSheet, Text, View } from 'react-native';
+import { useAuthStore } from '@/stores/authStore';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, AppState, AppStateStatus, Keyboard, StyleSheet, Text, TouchableWithoutFeedback, View } from 'react-native';
 
 function formatMsRemaining(ms: number) {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -88,61 +88,64 @@ export function AdminUnlockGate() {
     !lockState.ok ? `Locked. Try again in ${formatMsRemaining(lockState.lockUntilMs - Date.now())}.` : null;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Admin Access</Text>
-        <Text style={styles.subtitle}>Enter your 6-digit admin code</Text>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <View style={styles.container}>
+        <View style={styles.card}>
+          <Text style={styles.title}>Admin Access</Text>
+          <Text style={styles.subtitle}>Enter your 6-digit admin code</Text>
 
-        <AdminCodeInput
-          disabled={isVerifying || !teamNumber}
-          error={error}
-          helperText={`Forgot your code? Contact support at [PLACEHOLDER_EMAIL]`}
-          onSubmit={handleSubmit}
-        />
+          <AdminCodeInput
+            disabled={isVerifying || !teamNumber}
+            error={error}
+            helperText={`Forgot your code? Contact support at [PLACEHOLDER_EMAIL]`}
+            onSubmit={handleSubmit}
+          />
 
-        {lockMessage ? <Text style={styles.lockText}>{lockMessage}</Text> : null}
+          {lockMessage ? <Text style={styles.lockText}>{lockMessage}</Text> : null}
 
-        {isVerifying ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator />
-            <Text style={styles.loadingText}>Verifying…</Text>
-          </View>
-        ) : null}
+          {isVerifying ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color="#ff6600" />
+              <Text style={styles.loadingText}>Verifying…</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
-    </View>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    padding: 24,
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 24,
     justifyContent: 'center',
+    paddingBottom: 0,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#1e40af',
+    color: '#ff6600',
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 20,
   },
   lockText: {
     marginTop: 10,
-    color: '#b45309',
+    color: '#ff9900',
     textAlign: 'center',
     fontSize: 13,
   },
@@ -154,7 +157,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   loadingText: {
-    color: '#374151',
+    color: '#b0b0b0',
     fontSize: 13,
   },
 });

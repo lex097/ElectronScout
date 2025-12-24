@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 type Props = {
@@ -91,20 +91,20 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    backgroundColor: '#fff',
+    borderColor: '#404040',
+    backgroundColor: '#2a2a2a',
     alignItems: 'center',
     justifyContent: 'center',
   },
   boxFilled: {
-    borderColor: '#1e40af',
+    borderColor: '#ff6600',
   },
   boxError: {
     borderColor: '#ef4444',
   },
   boxText: {
     fontSize: 24,
-    color: '#111827',
+    color: '#fff',
     fontWeight: '700',
   },
   hiddenInput: {
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
   },
   helperText: {
     marginTop: 10,
-    color: '#6b7280',
+    color: '#b0b0b0',
     fontSize: 13,
     textAlign: 'center',
   },
@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: '#1e40af',
+    backgroundColor: '#ff6600',
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
@@ -144,15 +144,15 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   secondaryButtonText: {
-    color: '#374151',
+    color: '#e5e5e5',
     fontSize: 15,
     fontWeight: '700',
   },

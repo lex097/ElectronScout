@@ -4,12 +4,12 @@ import { useAuthStore } from '@/stores/authStore';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -75,7 +75,7 @@ export default function AdminDashboard() {
       <ScrollView style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>Administrator Dashboard</Text>
-          <Text style={styles.subtitle}>Logged in as: {user?.username}</Text>
+          <Text style={styles.subtitle}>Logged in as: {user?.name}</Text>
         </View>
 
         <View style={styles.statsContainer}>
@@ -129,7 +129,7 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
   },
   content: {
     flex: 1,
@@ -141,12 +141,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#ff6600',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -155,22 +155,22 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     padding: 20,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   statValue: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#1e40af',
+    color: '#ff6600',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   section: {
     marginBottom: 24,
@@ -178,20 +178,20 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#fff',
     marginBottom: 12,
   },
   actionButton: {
-    backgroundColor: 'white',
+    backgroundColor: '#2a2a2a',
     padding: 16,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   actionButtonText: {
     fontSize: 16,
-    color: '#374151',
+    color: '#e5e5e5',
     fontWeight: '500',
   },
   dangerText: {

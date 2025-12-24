@@ -1,21 +1,21 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { adminService, MatchRow, TeamContext } from '@/services/adminService';
-import { useAuthStore } from '@/stores/authStore';
 import { useAdminStore } from '@/stores/adminStore';
+import { useAuthStore } from '@/stores/authStore';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { format } from 'date-fns';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  AppState,
-  AppStateStatus,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    AppState,
+    AppStateStatus,
+    FlatList,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 function formatTimestamp(ts: number) {
@@ -170,7 +170,7 @@ export function AdminPanel() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator />
+        <ActivityIndicator color="#ff6600" />
         <Text style={styles.loadingText}>Loading…</Text>
       </View>
     );
@@ -191,7 +191,7 @@ export function AdminPanel() {
           disabled={refreshing}
           accessibilityRole="button"
         >
-          <FontAwesome name="refresh" size={18} color="#111827" />
+          <FontAwesome name="refresh" size={18} color="#ff6600" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.lockButton} onPress={handleLock}>
           <FontAwesome name="lock" size={16} color="#fff" />
@@ -200,12 +200,12 @@ export function AdminPanel() {
       </View>
 
       <View style={styles.searchRow}>
-        <FontAwesome name="search" size={16} color="#6b7280" />
+        <FontAwesome name="search" size={16} color="#b0b0b0" />
         <TextInput
           value={search}
           onChangeText={setSearch}
           placeholder="Search match #, team #, scout, event…"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#888"
           style={styles.searchInput}
           autoCapitalize="none"
           autoCorrect={false}
@@ -214,7 +214,7 @@ export function AdminPanel() {
 
       <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.resetButton} onPress={handleResetAdminCode}>
-          <FontAwesome name="refresh" size={16} color="#111827" />
+          <FontAwesome name="refresh" size={16} color="#ff6600" />
           <Text style={styles.resetButtonText}>Reset Admin Code</Text>
         </TouchableOpacity>
       </View>
@@ -223,7 +223,10 @@ export function AdminPanel() {
         data={filtered}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={filtered.length === 0 ? styles.emptyContainer : undefined}
+        contentContainerStyle={[
+          filtered.length === 0 ? styles.emptyContainer : undefined,
+          { paddingBottom: 0 }
+        ]}
         ListEmptyComponent={<Text style={styles.emptyText}>No scouting entries found.</Text>}
         renderItem={({ item }) => (
           <View style={styles.row}>
@@ -252,8 +255,9 @@ export function AdminPanel() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
     padding: 16,
+    paddingBottom: 0,
   },
   header: {
     flexDirection: 'row',
@@ -264,20 +268,22 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#111827',
+    color: '#ff6600',
   },
   subtitle: {
     marginTop: 2,
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   lockButton: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#2a2a2a',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#404040',
   },
   lockButtonText: {
     color: '#fff',
@@ -289,17 +295,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -307,7 +313,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: '#111827',
+    color: '#fff',
     fontSize: 14,
   },
   actionsRow: {
@@ -319,24 +325,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
   },
   resetButtonText: {
-    color: '#111827',
+    color: '#ff6600',
     fontWeight: '700',
   },
   row: {
     flexDirection: 'row',
     gap: 12,
     alignItems: 'flex-start',
-    backgroundColor: '#fff',
+    backgroundColor: '#2a2a2a',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#404040',
     borderRadius: 12,
     padding: 14,
     marginBottom: 10,
@@ -344,16 +350,16 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#111827',
+    color: '#fff',
   },
   rowMeta: {
     marginTop: 4,
-    color: '#6b7280',
+    color: '#b0b0b0',
     fontSize: 13,
   },
   rowNotes: {
     marginTop: 8,
-    color: '#374151',
+    color: '#e5e5e5',
     fontSize: 13,
   },
   deleteButton: {
@@ -363,25 +369,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#fee2e2',
-    backgroundColor: '#fff',
+    borderColor: '#ef4444',
+    backgroundColor: '#3a2a2a',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#1a1a1a',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
   },
   loadingText: {
-    color: '#374151',
+    color: '#b0b0b0',
   },
   emptyContainer: {
     paddingTop: 40,
+    paddingBottom: 0,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#6b7280',
+    color: '#b0b0b0',
   },
   toast: {
     paddingVertical: 10,
@@ -391,15 +398,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   toastSuccess: {
-    backgroundColor: '#ecfdf5',
+    backgroundColor: '#2a3a2a',
     borderColor: '#10b981',
   },
   toastError: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: '#3a2a2a',
     borderColor: '#ef4444',
   },
   toastText: {
-    color: '#111827',
+    color: '#fff',
     fontWeight: '600',
     textAlign: 'center',
   },
