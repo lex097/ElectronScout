@@ -163,13 +163,16 @@ export class SyncManager {
         const transformed = toInsert.map(m => SyncTransformer.transformMatch(m));
         const result = await supabaseSyncService.batchInsertMatches(transformed);
         
-        successCount += result.success;
-        failedCount += result.failed;
+        const successIds = new Set([...result.insertedIds, ...result.skippedDeletedIds]);
+        const failedIds = new Set(result.failedIds);
 
-        // Mark successful as synced
-        for (let i = 0; i < toInsert.length; i++) {
-          if (i < result.success) {
-            await db.markAsSynced(toInsert[i].id);
+        successCount += successIds.size;
+        failedCount += failedIds.size;
+
+        // Mark successful (including admin-deleted) as synced so they clear from local DB
+        for (const match of toInsert) {
+          if (successIds.has(match.id)) {
+            await db.markAsSynced(match.id);
           }
         }
       }

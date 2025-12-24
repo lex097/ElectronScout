@@ -121,6 +121,28 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="admin"
+        options={{
+          title: 'Admin',
+          tabBarIcon: ({ color }) => <TabBarIcon name="shield" color={color} />,
+          headerLeft: () => (
+            <Pressable
+              onPress={handleLogout}
+              style={({ pressed }) => ({
+                marginLeft: 15,
+                opacity: pressed ? 0.5 : 1,
+              })}
+            >
+              <FontAwesome
+                name="sign-out"
+                size={22}
+                color={Colors[colorScheme ?? 'light'].text}
+              />
+            </Pressable>
+          ),
+        }}
+      />
     </Tabs>
   );
 }
