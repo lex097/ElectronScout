@@ -25,31 +25,31 @@ export default function CreateAdminCodeScreen() {
   const confirmInputRef = useRef<TextInput>(null);
 
   const handleAdminCodeChange = (text: string) => {
-    // Only allow digits, max 6 characters
-    const digitsOnly = text.replace(/[^0-9]/g, '').slice(0, 6);
+    // Only allow digits, max 4 characters
+    const digitsOnly = text.replace(/[^0-9]/g, '').slice(0, 4);
     setAdminCode(digitsOnly);
     setError(null);
     
-    // Auto-advance to confirm input when 6 digits entered
-    if (digitsOnly.length === 6) {
+    // Auto-advance to confirm input when 4 digits entered
+    if (digitsOnly.length === 4) {
       confirmInputRef.current?.focus();
     }
   };
 
   const handleConfirmCodeChange = (text: string) => {
-    // Only allow digits, max 6 characters
-    const digitsOnly = text.replace(/[^0-9]/g, '').slice(0, 6);
+    // Only allow digits, max 4 characters
+    const digitsOnly = text.replace(/[^0-9]/g, '').slice(0, 4);
     setConfirmCode(digitsOnly);
     setError(null);
   };
 
   const validateCodes = (): boolean => {
-    if (adminCode.length !== 6) {
-      setError('Admin code must be exactly 6 digits');
+    if (adminCode.length !== 4) {
+      setError('Admin code must be exactly 4 digits');
       return false;
     }
 
-    if (confirmCode.length !== 6) {
+    if (confirmCode.length !== 4) {
       setError('Please confirm your admin code');
       return false;
     }
@@ -107,7 +107,7 @@ export default function CreateAdminCodeScreen() {
         <View style={styles.content}>
           <Text style={styles.title}>Create Admin Code</Text>
           <Text style={styles.subtitle}>
-            Set a 6-digit code for team administrators
+            Set a 4-digit code for team administrators
           </Text>
 
           <View style={styles.form}>
@@ -117,10 +117,10 @@ export default function CreateAdminCodeScreen() {
                 style={[styles.input, error && styles.inputError]}
                 value={adminCode}
                 onChangeText={handleAdminCodeChange}
-                placeholder="000000"
+                placeholder="0000"
                 placeholderTextColor="#888"
                 keyboardType="number-pad"
-                maxLength={6}
+                maxLength={4}
                 editable={!isLoading}
                 returnKeyType="next"
                 onSubmitEditing={() => confirmInputRef.current?.focus()}
@@ -134,15 +134,15 @@ export default function CreateAdminCodeScreen() {
                 style={[styles.input, error && styles.inputError]}
                 value={confirmCode}
                 onChangeText={handleConfirmCodeChange}
-                placeholder="000000"
+                placeholder="0000"
                 placeholderTextColor="#888"
                 keyboardType="number-pad"
-                maxLength={6}
+                maxLength={4}
                 editable={!isLoading}
                 returnKeyType="done"
                 onSubmitEditing={() => {
                   Keyboard.dismiss();
-                  if (adminCode.length === 6 && confirmCode.length === 6) {
+                  if (adminCode.length === 4 && confirmCode.length === 4) {
                     handleCreate();
                   }
                 }}
@@ -153,7 +153,7 @@ export default function CreateAdminCodeScreen() {
             <TouchableOpacity
               style={[styles.button, isLoading && styles.buttonDisabled]}
               onPress={handleCreate}
-              disabled={isLoading || adminCode.length !== 6 || confirmCode.length !== 6}
+              disabled={isLoading || adminCode.length !== 4 || confirmCode.length !== 4}
             >
               {isLoading ? (
                 <ActivityIndicator color="#fff" />

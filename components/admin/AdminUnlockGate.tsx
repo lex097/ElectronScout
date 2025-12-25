@@ -89,28 +89,28 @@ export function AdminUnlockGate() {
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Admin Access</Text>
-          <Text style={styles.subtitle}>Enter your 6-digit admin code</Text>
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Admin Access</Text>
+          <Text style={styles.subtitle}>Enter your 4-digit admin code</Text>
 
-          <AdminCodeInput
-            disabled={isVerifying || !teamNumber}
-            error={error}
-            helperText={`Forgot your code? Contact support at [PLACEHOLDER_EMAIL]`}
-            onSubmit={handleSubmit}
-          />
+        <AdminCodeInput
+          disabled={isVerifying || !teamNumber}
+          error={error}
+          helperText={`Forgot your code? Contact support at [PLACEHOLDER_EMAIL]`}
+          onSubmit={handleSubmit}
+        />
 
-          {lockMessage ? <Text style={styles.lockText}>{lockMessage}</Text> : null}
+        {lockMessage ? <Text style={styles.lockText}>{lockMessage}</Text> : null}
 
-          {isVerifying ? (
-            <View style={styles.loadingRow}>
+        {isVerifying ? (
+          <View style={styles.loadingRow}>
               <ActivityIndicator color="#ff6600" />
-              <Text style={styles.loadingText}>Verifying…</Text>
-            </View>
-          ) : null}
-        </View>
+            <Text style={styles.loadingText}>Verifying…</Text>
+          </View>
+        ) : null}
       </View>
+    </View>
     </TouchableWithoutFeedback>
   );
 }

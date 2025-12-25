@@ -71,21 +71,21 @@ function RootLayoutNav() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={{ headerShown: false, gestureEnabled: false }}>
-            <Stack.Screen name="login" />
-            <Stack.Screen name="verify-team-code" />
-            <Stack.Screen name="create-admin-code" />
-            <Stack.Screen name="team-created" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="verify-team-code" />
+          <Stack.Screen name="create-admin-code" />
+          <Stack.Screen name="team-created" />
             <Stack.Screen name="select-event" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-match" options={{ gestureEnabled: true }} />
-            <Stack.Screen name="select-team" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="(admin)" />
-          </Stack>
-        </ThemeProvider>
-      </QueryClientProvider>
+          <Stack.Screen name="select-team" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="(admin)" />
+        </Stack>
+      </ThemeProvider>
+    </QueryClientProvider>
     </GestureHandlerRootView>
   );
 }

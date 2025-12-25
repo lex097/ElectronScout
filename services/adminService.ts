@@ -20,9 +20,9 @@ export type MatchRow = {
   timestamp: number;
 };
 
-function generateAdminCode6(): string {
-  const n = Math.floor(Math.random() * 1_000_000);
-  return String(n).padStart(6, '0');
+function generateAdminCode4(): string {
+  const n = Math.floor(Math.random() * 10_000);
+  return String(n).padStart(4, '0');
 }
 
 export class AdminService {
@@ -124,7 +124,7 @@ export class AdminService {
   }
 
   async resetAdminCode(teamId: string): Promise<{ newAdminCode: string }> {
-    const newAdminCode = generateAdminCode6();
+    const newAdminCode = generateAdminCode4();
     const { error } = await supabase.from('teams').update({ admin_code: newAdminCode }).eq('id', teamId);
     if (error) {
       throw new Error(error.message || 'Failed to reset admin code.');

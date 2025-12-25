@@ -12,11 +12,11 @@ export function AdminCodeInput({ disabled, error, helperText, onSubmit }: Props)
   const inputRef = useRef<TextInput>(null);
   const [code, setCode] = useState('');
 
-  const boxes = useMemo(() => Array.from({ length: 6 }, (_, i) => i), []);
-  const canSubmit = code.length === 6 && !disabled;
+  const boxes = useMemo(() => Array.from({ length: 4 }, (_, i) => i), []);
+  const canSubmit = code.length === 4 && !disabled;
 
   const handleChange = (text: string) => {
-    const digits = text.replace(/[^0-9]/g, '').slice(0, 6);
+    const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
     setCode(digits);
   };
 
@@ -48,7 +48,7 @@ export function AdminCodeInput({ disabled, error, helperText, onSubmit }: Props)
         value={code}
         onChangeText={handleChange}
         keyboardType="number-pad"
-        maxLength={6}
+        maxLength={4}
         editable={!disabled}
         autoFocus={false}
         style={styles.hiddenInput}

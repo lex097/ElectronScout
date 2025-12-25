@@ -2,16 +2,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   RefreshControl,
   ScrollView,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,20 +19,14 @@ import { getEventRankings } from '../../api/services/events';
 import { ACTIVE_GAME_CONFIG, GameConfig } from '../../config/gameConfig';
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
+import { Picklists, picklistService } from '../../services/picklistService';
 import { supabaseSyncService } from '../../services/supabase.sync';
-
-const PICKLISTS_STORAGE_KEY = 'picklists';
+import { useAuthStore } from '../../stores/authStore';
 
 interface RankedTeam {
   teamNumber: number;
   rank: number;
   analytics?: TeamAnalytics;
-}
-
-interface Picklists {
-  firstPick: number[];
-  secondPick: number[];
-  doNotPick: number[];
 }
 
 export default function PicklistsScreen() {
@@ -49,6 +43,7 @@ export default function PicklistsScreen() {
   const [longPressedTeam, setLongPressedTeam] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const getTeamNumber = useAuthStore((state) => state.getTeamNumber);
 
   // Load event key and picklists from storage
   useEffect(() => {
@@ -57,16 +52,18 @@ export default function PicklistsScreen() {
         const storedEventKey = await AsyncStorage.getItem('selected_event_key');
         setEventKey(storedEventKey);
 
-        const storedPicklists = await AsyncStorage.getItem(PICKLISTS_STORAGE_KEY);
-        if (storedPicklists) {
-          setPicklists(JSON.parse(storedPicklists));
+        // Load picklists using the service (team-scoped)
+        const teamNumber = await getTeamNumber();
+        if (teamNumber && storedEventKey) {
+          const loadedPicklists = await picklistService.loadPicklists(teamNumber, storedEventKey);
+          setPicklists(loadedPicklists);
         }
       } catch (error) {
         console.error('Error loading storage:', error);
       }
     };
     loadStorage();
-  }, []);
+  }, [getTeamNumber]);
 
   // Load rankings and analytics
   const loadData = useCallback(async (showRefresh = false) => {
@@ -119,10 +116,10 @@ export default function PicklistsScreen() {
         })
         .filter((team): team is RankedTeam => team !== null);
 
-      // Get current picklists to filter
-      const storedPicklists = await AsyncStorage.getItem(PICKLISTS_STORAGE_KEY);
-      const currentPicklists: Picklists = storedPicklists 
-        ? JSON.parse(storedPicklists) 
+      // Get current picklists to filter (using service, team-scoped)
+      const teamNumber = await getTeamNumber();
+      const currentPicklists: Picklists = teamNumber && eventKey
+        ? await picklistService.loadPicklists(teamNumber, eventKey)
         : { firstPick: [], secondPick: [], doNotPick: [] };
 
       // Store all ranked teams
@@ -147,7 +144,7 @@ export default function PicklistsScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [eventKey]);
+  }, [eventKey, getTeamNumber]);
 
   useFocusEffect(
     useCallback(() => {
@@ -157,15 +154,20 @@ export default function PicklistsScreen() {
 
 
   // Move team from ranked list to picklist
-  const moveToPicklist = (teamNumber: number, category: keyof Picklists) => {
+  const moveToPicklist = async (teamNumber: number, category: keyof Picklists) => {
     const newPicklists = { ...picklists };
     newPicklists[category] = [...newPicklists[category], teamNumber];
     
     // Update picklists state first
     setPicklists(newPicklists);
     
-    // Save to storage
-    AsyncStorage.setItem(PICKLISTS_STORAGE_KEY, JSON.stringify(newPicklists)).catch(console.error);
+    // Save using service (team-scoped, saves to both Supabase and local storage)
+    if (eventKey) {
+      const teamNumberStr = await getTeamNumber();
+      if (teamNumberStr) {
+        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
+      }
+    }
     
     // Update ranked teams list immediately without reload
     setAllRankedTeams(prevAll => {
@@ -181,15 +183,20 @@ export default function PicklistsScreen() {
   };
 
   // Remove team from picklist and return to ranked list
-  const removeFromPicklist = (teamNumber: number, category: keyof Picklists) => {
+  const removeFromPicklist = async (teamNumber: number, category: keyof Picklists) => {
     const newPicklists = { ...picklists };
     newPicklists[category] = newPicklists[category].filter(num => num !== teamNumber);
     
     // Update picklists state first
     setPicklists(newPicklists);
     
-    // Save to storage
-    AsyncStorage.setItem(PICKLISTS_STORAGE_KEY, JSON.stringify(newPicklists)).catch(console.error);
+    // Save using service (team-scoped, saves to both Supabase and local storage)
+    if (eventKey) {
+      const teamNumberStr = await getTeamNumber();
+      if (teamNumberStr) {
+        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
+      }
+    }
     
     // Update ranked teams list immediately without reload
     setAllRankedTeams(prevAll => {
@@ -205,14 +212,19 @@ export default function PicklistsScreen() {
   };
 
   // Reorder teams in a picklist
-  const reorderPicklist = (category: keyof Picklists, fromIndex: number, toIndex: number) => {
+  const reorderPicklist = async (category: keyof Picklists, fromIndex: number, toIndex: number) => {
     const newPicklists = { ...picklists };
     const [removed] = newPicklists[category].splice(fromIndex, 1);
     newPicklists[category].splice(toIndex, 0, removed);
     
-    // Update state and save, no need to reload
+    // Update state and save using service (team-scoped)
     setPicklists(newPicklists);
-    AsyncStorage.setItem(PICKLISTS_STORAGE_KEY, JSON.stringify(newPicklists)).catch(console.error);
+    if (eventKey) {
+      const teamNumberStr = await getTeamNumber();
+      if (teamNumberStr) {
+        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
+      }
+    }
   };
 
   const calculatePhasePoints = (metrics: Record<string, any>, phaseId: string, config: GameConfig = ACTIVE_GAME_CONFIG): number => {
@@ -474,15 +486,111 @@ export default function PicklistsScreen() {
     );
   };
 
-  if (isLoading) {
+  // Skeleton loader component
+  const SkeletonBox = ({ width, height, style }: { width?: number | string; height: number; style?: any }) => {
+    const opacity = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0.7,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.3,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      animation.start();
+      return () => animation.stop();
+    }, [opacity]);
+
+    return (
+      <Animated.View
+        style={[
+          {
+            width: width || '100%',
+            height,
+            backgroundColor: '#3a3a3a',
+            borderRadius: 8,
+            opacity,
+          },
+          style,
+        ]}
+      />
+    );
+  };
+
+  const renderSkeletonLoader = () => {
+    const screenHeight = Dimensions.get('window').height;
+    const topSectionHeight = screenHeight * 0.5;
+    const bottomSectionHeight = screenHeight * 0.5;
+
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#ff6600" />
-          <Text style={styles.loadingText}>Loading picklists...</Text>
+        <View style={styles.content}>
+          {/* Top Section: Ranked Teams List Skeleton */}
+          <View style={[styles.topSection, { height: topSectionHeight }]}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeaderLeft}>
+                <SkeletonBox width={120} height={18} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                <SkeletonBox width={200} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+              </View>
+              <SkeletonBox width={24} height={24} style={{ borderRadius: 12, backgroundColor: '#3a3a3a' }} />
+            </View>
+            <ScrollView style={styles.rankedTeamsList}>
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <View key={i} style={styles.teamCard}>
+                  <View style={styles.teamCardHeader}>
+                    <View style={styles.teamCardLeft}>
+                      <SkeletonBox width={150} height={18} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                      <SkeletonBox width={80} height={14} style={{ backgroundColor: '#3a3a3a' }} />
+                    </View>
+                    <View style={styles.teamCardRight}>
+                      <SkeletonBox width={50} height={24} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                      <SkeletonBox width={70} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Bottom Section: Picklists Skeleton */}
+          <View style={[styles.bottomSection, { height: bottomSectionHeight }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.picklistsContainer}>
+              {[0, 1, 2].map((idx) => {
+                const colors = ['#10b981', '#ff6600', '#ef4444'];
+                return (
+                  <View key={idx} style={styles.picklistSection}>
+                    <View style={[styles.picklistHeader, { backgroundColor: colors[idx] }]}>
+                      <SkeletonBox width={100} height={18} style={{ backgroundColor: 'rgba(255, 255, 255, 0.3)', borderRadius: 4, opacity: 1 }} />
+                      <SkeletonBox width={30} height={18} style={{ backgroundColor: 'rgba(255, 255, 255, 0.3)', borderRadius: 12, opacity: 1 }} />
+                    </View>
+                    {[1, 2, 3].map((i) => (
+                      <View key={i} style={styles.picklistItem}>
+                        <View style={styles.picklistItemContent}>
+                          <SkeletonBox width={100} height={16} style={{ backgroundColor: '#3a3a3a' }} />
+                          <SkeletonBox width={50} height={14} style={{ backgroundColor: '#3a3a3a' }} />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
         </View>
       </SafeAreaView>
     );
+  };
+
+  if (isLoading) {
+    return renderSkeletonLoader();
   }
 
   if (!eventKey) {

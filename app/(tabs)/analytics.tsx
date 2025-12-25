@@ -1,10 +1,11 @@
 // app/(tabs)/analytics.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -12,8 +13,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { ACTIVE_GAME_CONFIG, calculateMatchPoints, GameConfig } from '../../config/gameConfig';
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
@@ -37,7 +38,7 @@ export default function AnalyticsScreen() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>('local');
 
-  const loadData = async (showRefresh = false) => {
+  const loadData = useCallback(async (showRefresh = false) => {
     try {
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
@@ -70,19 +71,14 @@ export default function AnalyticsScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [dataSource]);
 
   // Load data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [])
+    }, [loadData])
   );
-
-  // Reload data when dataSource changes
-  useEffect(() => {
-    loadData();
-  }, [dataSource]);
 
   const handleClearData = () => {
     Alert.alert(
@@ -291,6 +287,142 @@ export default function AnalyticsScreen() {
     return { points, labels };
   };
 
+  // SVG Line Chart Component (using react-native-svg)
+  const PerformanceChart = ({ points, labels, maxPoints }: { points: number[]; labels: string[]; maxPoints: number }) => {
+    const screenWidth = Dimensions.get('window').width;
+    const chartWidth = screenWidth - 64;
+    const chartHeight = 200;
+    const paddingLeft = 50;
+    const paddingRight = 20;
+    const paddingTop = 20;
+    const paddingBottom = 40;
+    const graphWidth = chartWidth - paddingLeft - paddingRight;
+    const graphHeight = chartHeight - paddingTop - paddingBottom;
+
+    if (points.length === 0) {
+      return null;
+    }
+
+    // Calculate positions for each point
+    const pointPositions = points.map((point, index) => {
+      const x = paddingLeft + (index / Math.max(points.length - 1, 1)) * graphWidth;
+      const y = paddingTop + graphHeight - (point / maxPoints) * graphHeight;
+      return { x, y, value: point };
+    });
+
+    // Create path string for the line
+    const pathData = pointPositions
+      .map((pos, index) => `${index === 0 ? 'M' : 'L'} ${pos.x} ${pos.y}`)
+      .join(' ');
+
+    return (
+      <View style={{ width: chartWidth, height: chartHeight }}>
+        <Svg width={chartWidth} height={chartHeight}>
+          {/* Grid lines */}
+          {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+            const y = paddingTop + graphHeight - ratio * graphHeight;
+            return (
+              <Line
+                key={`grid-${i}`}
+                x1={paddingLeft}
+                y1={y}
+                x2={chartWidth - paddingRight}
+                y2={y}
+                stroke="#404040"
+                strokeWidth="1"
+              />
+            );
+          })}
+
+          {/* Y-axis line */}
+          <Line
+            x1={paddingLeft}
+            y1={paddingTop}
+            x2={paddingLeft}
+            y2={paddingTop + graphHeight}
+            stroke="#404040"
+            strokeWidth="1"
+          />
+
+          {/* X-axis line */}
+          <Line
+            x1={paddingLeft}
+            y1={paddingTop + graphHeight}
+            x2={chartWidth - paddingRight}
+            y2={paddingTop + graphHeight}
+            stroke="#404040"
+            strokeWidth="1"
+          />
+
+          {/* Chart line */}
+          <Path
+            d={pathData}
+            fill="none"
+            stroke="#ff6600"
+            strokeWidth="2"
+          />
+
+          {/* Points */}
+          {pointPositions.map((pos, index) => (
+            <Circle
+              key={`point-${index}`}
+              cx={pos.x}
+              cy={pos.y}
+              r="3"
+              fill="#ff6600"
+              stroke="#1a1a1a"
+              strokeWidth="2"
+            />
+          ))}
+        </Svg>
+
+        {/* Y-axis labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+          const y = paddingTop + graphHeight - ratio * graphHeight;
+          const value = Math.round(ratio * maxPoints);
+          return (
+            <Text
+              key={`y-label-${i}`}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: y - 8,
+                width: paddingLeft - 5,
+                color: '#b0b0b0',
+                fontSize: 11,
+                textAlign: 'right',
+              }}
+            >
+              {value}
+            </Text>
+          );
+        })}
+
+        {/* X-axis labels */}
+        {labels.map((label, index) => {
+          if (index % Math.max(Math.ceil(labels.length / 6), 1) !== 0 && index !== labels.length - 1) return null;
+          const x = paddingLeft + (index / Math.max(points.length - 1, 1)) * graphWidth;
+          return (
+            <Text
+              key={`x-label-${index}`}
+              style={{
+                position: 'absolute',
+                left: x - 15,
+                top: chartHeight - paddingBottom + 5,
+                width: 30,
+                color: '#b0b0b0',
+                fontSize: 11,
+                textAlign: 'center',
+              }}
+            >
+              {label}
+            </Text>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
@@ -344,60 +476,12 @@ export default function AnalyticsScreen() {
               <Text style={styles.sectionLabel}>Performance Progress</Text>
               {team.matchHistory.length > 0 && (() => {
                 const { points, labels } = getMatchPointsData(team);
-                const screenWidth = Dimensions.get('window').width;
                 const maxPoints = getMaxPointsAcrossAllTeams();
                 
                 return (
-                  <LineChart
-                    data={{
-                      labels: labels,
-                      datasets: [
-                        {
-                          data: points.length > 0 ? points : [0],
-                        },
-                        {
-                          data: [0],
-                          withDots: false,
-                          strokeWidth: 0,
-                        },
-                        {
-                          data: [maxPoints],
-                          withDots: false,
-                          strokeWidth: 0,
-                        }
-                      ]
-                    }}
-                    width={screenWidth - 64}
-                    height={200}
-                    chartConfig={{
-                      backgroundColor: '#ffffff',
-                      backgroundGradientFrom: '#ffffff',
-                      backgroundGradientTo: '#ffffff',
-                      decimalPlaces: 0,
-                      color: (opacity = 1) => `rgba(30, 64, 175, ${opacity})`,
-                      labelColor: (opacity = 1) => `rgba(107, 114, 128, ${opacity})`,
-                      style: {
-                        borderRadius: 16,
-                      },
-                      propsForDots: {
-                        r: '4',
-                        strokeWidth: '2',
-                        stroke: '#ff6600',
-                      },
-                      propsForBackgroundLines: {
-                        strokeDasharray: '', // solid lines
-                        stroke: '#404040',
-                        strokeWidth: 1,
-                      },
-                    }}
-                    withShadow={false}
-                    withInnerLines={true}
-                    withOuterLines={true}
-                    style={{
-                      marginVertical: 8,
-                      borderRadius: 16,
-                    }}
-                  />
+                  <View style={{ marginVertical: 8 }}>
+                    <PerformanceChart points={points} labels={labels} maxPoints={maxPoints} />
+                  </View>
                 );
               })()}
             </View>
@@ -465,19 +549,112 @@ export default function AnalyticsScreen() {
     );
   };
 
-  if (isLoading) {
+  // Skeleton loader component
+  const SkeletonBox = ({ width, height, style }: { width?: number | string; height: number; style?: any }) => {
+    const opacity = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0.7,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.3,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      animation.start();
+      return () => animation.stop();
+    }, [opacity]);
+
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#ff6600" />
-          <Text style={styles.loadingText}>Loading analytics...</Text>
+      <Animated.View
+        style={[
+          {
+            width: width || '100%',
+            height,
+            backgroundColor: '#3a3a3a',
+            borderRadius: 8,
+            opacity,
+          },
+          style,
+        ]}
+      />
+    );
+  };
+
+  const renderSkeletonLoader = () => {
+    return (
+      <SafeAreaView style={styles.container} edges={[]}>
+        <View style={styles.segmentedControl}>
+          <View style={[styles.segmentButton, styles.segmentButtonLeft, styles.segmentButtonActive]}>
+            <SkeletonBox width={70} height={16} style={{ borderRadius: 0, opacity: 1 }} />
+          </View>
+          <View style={[styles.segmentButton, styles.segmentButtonRight]}>
+            <SkeletonBox width={80} height={16} style={{ borderRadius: 0, opacity: 0.5 }} />
+          </View>
         </View>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {/* Stats Header Skeleton */}
+          <View style={styles.statsHeader}>
+            <View style={styles.statBox}>
+              <SkeletonBox width={60} height={28} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+              <SkeletonBox width={80} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+            </View>
+            <View style={styles.statBox}>
+              <SkeletonBox width={40} height={28} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+              <SkeletonBox width={90} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+            </View>
+            {dataSource === 'local' && (
+              <View style={[styles.statBox, styles.clearDataBox]}>
+                <SkeletonBox width={24} height={24} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                <SkeletonBox width={70} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+              </View>
+            )}
+          </View>
+
+          {/* Sort Controls Skeleton */}
+          <View style={styles.sortControls}>
+            <SkeletonBox width={60} height={16} style={{ marginRight: 12, backgroundColor: '#3a3a3a' }} />
+            <SkeletonBox width={70} height={36} style={{ borderRadius: 18, marginRight: 8, backgroundColor: '#3a3a3a' }} />
+            <SkeletonBox width={70} height={36} style={{ borderRadius: 18, marginRight: 8, backgroundColor: '#3a3a3a' }} />
+            <SkeletonBox width={70} height={36} style={{ borderRadius: 18, marginRight: 8, backgroundColor: '#3a3a3a' }} />
+            <SkeletonBox width={70} height={36} style={{ borderRadius: 18, backgroundColor: '#3a3a3a' }} />
+          </View>
+
+          {/* Team Cards Skeleton */}
+          <View style={styles.teamList}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <View key={i} style={styles.teamCard}>
+                <View style={styles.teamCardHeader}>
+                  <View style={styles.teamCardLeft}>
+                    <SkeletonBox width={120} height={20} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                    <SkeletonBox width={80} height={14} style={{ backgroundColor: '#3a3a3a' }} />
+                  </View>
+                  <View style={styles.teamCardRight}>
+                    <SkeletonBox width={50} height={28} style={{ marginBottom: 8, backgroundColor: '#3a3a3a' }} />
+                    <SkeletonBox width={70} height={12} style={{ backgroundColor: '#3a3a3a' }} />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
+  };
+
+  if (isLoading) {
+    return renderSkeletonLoader();
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       {/* Segmented Control */}
       <View style={styles.segmentedControl}>
         <TouchableOpacity
@@ -533,10 +710,12 @@ export default function AnalyticsScreen() {
           </View>
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>{teamAnalytics.size}</Text>
-            <Text style={styles.statLabel}>Teams Scouted</Text>
+            <Text style={[styles.statLabel, dataSource === 'local' && styles.statLabelSmall]}>
+              Teams Scouted
+            </Text>
           </View>
           {dataSource === 'local' && (
-            <TouchableOpacity style={styles.statBox} onPress={handleClearData}>
+            <TouchableOpacity style={[styles.statBox, styles.clearDataBox]} onPress={handleClearData}>
               <Ionicons name="trash-outline" size={24} color="#ef4444" />
               <Text style={[styles.statLabel, { color: '#ef4444' }]}>Clear Data</Text>
             </TouchableOpacity>
@@ -745,6 +924,9 @@ const styles = {
     borderRadius: 12,
     alignItems: 'center' as const,
   },
+  clearDataBox: {
+    justifyContent: 'center' as const,
+  },
   statNumber: {
     fontSize: 28,
     fontWeight: 'bold' as const,
@@ -754,6 +936,9 @@ const styles = {
     fontSize: 12,
     color: '#b0b0b0',
     marginTop: 4,
+  },
+  statLabelSmall: {
+    fontSize: 10,
   },
   emptyState: {
     flex: 1,

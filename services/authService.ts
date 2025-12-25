@@ -197,15 +197,15 @@ export class AuthService {
   }
 
   /**
-   * Validate admin code format (6 digits)
+   * Validate admin code format (4 digits)
    */
   private validateAdminCodeFormat(adminCode: string): boolean {
-    return /^[0-9]{6}$/.test(adminCode);
+    return /^[0-9]{4}$/.test(adminCode);
   }
 
   private generateAdminCode(): string {
-    const n = Math.floor(Math.random() * 1_000_000);
-    return String(n).padStart(6, '0');
+    const n = Math.floor(Math.random() * 10_000);
+    return String(n).padStart(4, '0');
   }
 
   /**
@@ -215,7 +215,7 @@ export class AuthService {
     try {
       // Validate format
       if (!this.validateAdminCodeFormat(adminCode)) {
-        throw new Error('Admin code must be exactly 6 digits');
+        throw new Error('Admin code must be exactly 4 digits');
       }
 
       // Update teams table with admin_code

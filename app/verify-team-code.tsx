@@ -73,45 +73,45 @@ export default function VerifyTeamCodeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Enter Team Code</Text>
-          <Text style={styles.subtitle}>
-            Enter your team's 6-character code to continue
-          </Text>
+      <View style={styles.content}>
+        <Text style={styles.title}>Enter Team Code</Text>
+        <Text style={styles.subtitle}>
+          Enter your team's 6-character code to continue
+        </Text>
 
-          <View style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Team Code</Text>
-              <TextInput
-                style={[styles.input, error && styles.inputError]}
-                value={teamCode}
-                onChangeText={(text) => {
-                  setTeamCode(text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
-                  setError(null);
-                }}
-                placeholder="ABC123"
+        <View style={styles.form}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Team Code</Text>
+            <TextInput
+              style={[styles.input, error && styles.inputError]}
+              value={teamCode}
+              onChangeText={(text) => {
+                setTeamCode(text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                setError(null);
+              }}
+              placeholder="ABC123"
                 placeholderTextColor="#888"
-                autoCapitalize="characters"
-                autoCorrect={false}
-                maxLength={6}
-                editable={!isLoading}
-              />
-              {error && <Text style={styles.errorText}>{error}</Text>}
-            </View>
-
-            <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleVerify}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Verify</Text>
-              )}
-            </TouchableOpacity>
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={6}
+              editable={!isLoading}
+            />
+            {error && <Text style={styles.errorText}>{error}</Text>}
           </View>
+
+          <TouchableOpacity
+            style={[styles.button, isLoading && styles.buttonDisabled]}
+            onPress={handleVerify}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Verify</Text>
+            )}
+          </TouchableOpacity>
         </View>
+      </View>
       </TouchableWithoutFeedback>
     </SafeAreaView>
   );
