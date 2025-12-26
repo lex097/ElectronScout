@@ -21,6 +21,7 @@ import { analyticsService, TeamAnalytics } from '../../services/analyticsService
 import { db } from '../../services/database';
 import { Picklists, picklistService } from '../../services/picklistService';
 import { supabaseSyncService } from '../../services/supabase.sync';
+import { useAdminStore } from '../../stores/adminStore';
 import { useAuthStore } from '../../stores/authStore';
 
 interface RankedTeam {
@@ -44,6 +45,11 @@ export default function PicklistsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const getTeamNumber = useAuthStore((state) => state.getTeamNumber);
+  // Subscribe to admin store state to trigger re-renders when admin status changes
+  const unlockedAtMs = useAdminStore((state) => state.unlockedAtMs);
+  const sessionTtlMs = useAdminStore((state) => state.sessionTtlMs);
+  const isUnlockedFn = useAdminStore((state) => state.isUnlocked);
+  const isAdminUnlocked = isUnlockedFn();
 
   // Load event key and picklists from storage
   useEffect(() => {
@@ -155,6 +161,16 @@ export default function PicklistsScreen() {
 
   // Move team from ranked list to picklist
   const moveToPicklist = async (teamNumber: number, category: keyof Picklists) => {
+    // Check admin status
+    if (!isAdminUnlocked) {
+      Alert.alert(
+        'Admin Access Required',
+        'You need to enter the admin code in the Admin tab to edit picklists.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     const newPicklists = { ...picklists };
     newPicklists[category] = [...newPicklists[category], teamNumber];
     
@@ -184,6 +200,16 @@ export default function PicklistsScreen() {
 
   // Remove team from picklist and return to ranked list
   const removeFromPicklist = async (teamNumber: number, category: keyof Picklists) => {
+    // Check admin status
+    if (!isAdminUnlocked) {
+      Alert.alert(
+        'Admin Access Required',
+        'You need to enter the admin code in the Admin tab to edit picklists.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     const newPicklists = { ...picklists };
     newPicklists[category] = newPicklists[category].filter(num => num !== teamNumber);
     
@@ -213,6 +239,16 @@ export default function PicklistsScreen() {
 
   // Reorder teams in a picklist
   const reorderPicklist = async (category: keyof Picklists, fromIndex: number, toIndex: number) => {
+    // Check admin status
+    if (!isAdminUnlocked) {
+      Alert.alert(
+        'Admin Access Required',
+        'You need to enter the admin code in the Admin tab to edit picklists.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     const newPicklists = { ...picklists };
     const [removed] = newPicklists[category].splice(fromIndex, 1);
     newPicklists[category].splice(toIndex, 0, removed);
@@ -288,6 +324,16 @@ export default function PicklistsScreen() {
   };
 
   const handleLongPressTeam = (teamNumber: number) => {
+    // Check admin status before showing alert
+    if (!isAdminUnlocked) {
+      Alert.alert(
+        'Admin Access Required',
+        'You need to enter the admin code in the Admin tab to edit picklists.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setLongPressedTeam(teamNumber);
     Alert.alert(
       'Add Team to Picklist',
@@ -339,7 +385,17 @@ export default function PicklistsScreen() {
             setSelectedTeam(isExpanded ? null : team.teamNumber);
           }
         }}
-        onLongPress={() => handleLongPressTeam(team.teamNumber)}
+        onLongPress={() => {
+          if (isAdminUnlocked) {
+            handleLongPressTeam(team.teamNumber);
+          } else {
+            Alert.alert(
+              'Admin Access Required',
+              'You need to enter the admin code in the Admin tab to edit picklists.',
+              [{ text: 'OK' }]
+            );
+          }
+        }}
         activeOpacity={0.7}
       >
           <View style={styles.teamCardHeader}>
@@ -390,22 +446,25 @@ export default function PicklistsScreen() {
 
               <View style={styles.actionButtons}>
                 <TouchableOpacity
-                  style={[styles.actionButton, styles.firstPickButton]}
+                  style={[styles.actionButton, styles.firstPickButton, !isAdminUnlocked && styles.actionButtonDisabled]}
                   onPress={() => moveToPicklist(team.teamNumber, 'firstPick')}
+                  disabled={!isAdminUnlocked}
                 >
-                  <Text style={styles.actionButtonText}>First Pick</Text>
+                  <Text style={[styles.actionButtonText, !isAdminUnlocked && styles.actionButtonTextDisabled]}>First Pick</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionButton, styles.secondPickButton]}
+                  style={[styles.actionButton, styles.secondPickButton, !isAdminUnlocked && styles.actionButtonDisabled]}
                   onPress={() => moveToPicklist(team.teamNumber, 'secondPick')}
+                  disabled={!isAdminUnlocked}
                 >
-                  <Text style={styles.actionButtonText}>Second Pick</Text>
+                  <Text style={[styles.actionButtonText, !isAdminUnlocked && styles.actionButtonTextDisabled]}>Second Pick</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionButton, styles.doNotPickButton]}
+                  style={[styles.actionButton, styles.doNotPickButton, !isAdminUnlocked && styles.actionButtonDisabled]}
                   onPress={() => moveToPicklist(team.teamNumber, 'doNotPick')}
+                  disabled={!isAdminUnlocked}
                 >
-                  <Text style={styles.actionButtonText}>Do Not Pick</Text>
+                  <Text style={[styles.actionButtonText, !isAdminUnlocked && styles.actionButtonTextDisabled]}>Do Not Pick</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -455,9 +514,9 @@ export default function PicklistsScreen() {
           renderItem={({ item, drag, isActive }: RenderItemParams<number>) => (
             <ScaleDecorator>
               <TouchableOpacity
-                onLongPress={drag}
-                disabled={isActive}
-                style={[styles.picklistItem, isActive && styles.picklistItemActive]}
+                onLongPress={isAdminUnlocked ? drag : undefined}
+                disabled={isActive || !isAdminUnlocked}
+                style={[styles.picklistItem, isActive && styles.picklistItemActive, !isAdminUnlocked && styles.picklistItemDisabled]}
               >
                 <View style={styles.picklistItemContent}>
                   <Text style={styles.picklistTeamNumber}>Team {item}</Text>
@@ -467,12 +526,14 @@ export default function PicklistsScreen() {
                     </Text>
                   )}
                 </View>
-                <TouchableOpacity
-                  onPress={() => removeFromPicklist(item, category)}
-                  style={styles.removeButton}
-                >
-                  <Ionicons name="close-circle" size={20} color="#ef4444" />
-                </TouchableOpacity>
+                {isAdminUnlocked && (
+                  <TouchableOpacity
+                    onPress={() => removeFromPicklist(item, category)}
+                    style={styles.removeButton}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
               </TouchableOpacity>
             </ScaleDecorator>
           )}
@@ -865,6 +926,12 @@ const styles = {
     fontSize: 14,
     fontWeight: '600' as const,
   },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+  actionButtonTextDisabled: {
+    opacity: 0.7,
+  },
   picklistSection: {
     width: Dimensions.get('window').width * 0.85,
     marginRight: 16,
@@ -907,6 +974,9 @@ const styles = {
   picklistItemActive: {
     backgroundColor: '#3a3a3a',
     elevation: 4,
+  },
+  picklistItemDisabled: {
+    opacity: 0.7,
   },
   picklistItemContent: {
     flex: 1,
