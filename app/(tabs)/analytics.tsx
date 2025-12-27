@@ -1,5 +1,6 @@
 // app/(tabs)/analytics.tsx
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -18,6 +19,7 @@ import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { ACTIVE_GAME_CONFIG, calculateMatchPoints, GameConfig } from '../../config/gameConfig';
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
+import { exportService } from '../../services/exportService';
 import { supabaseSyncService } from '../../services/supabase.sync';
 import { syncManager } from '../../services/syncTransformer';
 import { MatchData } from '../../types/match';
@@ -36,6 +38,7 @@ export default function AnalyticsScreen() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>('local');
 
   const loadData = useCallback(async (showRefresh = false) => {
@@ -211,6 +214,48 @@ export default function AnalyticsScreen() {
       Alert.alert('Sync error', 'An unexpected error occurred.');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      if (teamMatches.length === 0) {
+        Alert.alert('No Data', 'No team data available to export.');
+        return;
+      }
+
+      Alert.alert(
+        'Export Data',
+        'This will export all scouting data for your team. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Export',
+            onPress: async () => {
+              try {
+                setIsExporting(true);
+                
+                // Get current event key if available
+                const eventKey = await AsyncStorage.getItem('selected_event_key');
+                
+                // Export and share
+                await exportService.exportAndShare(eventKey || undefined);
+              } catch (error: any) {
+                console.error('Export error:', error);
+                Alert.alert(
+                  'Export Failed',
+                  error.message || 'Failed to export data. Please try again.'
+                );
+              } finally {
+                setIsExporting(false);
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Export error:', error);
+      Alert.alert('Error', 'Failed to export data');
     }
   };
 
@@ -722,6 +767,29 @@ export default function AnalyticsScreen() {
           )}
         </View>
 
+        {/* Export Button - Only show in Team Data section */}
+        {dataSource === 'team' && teamMatches.length > 0 && (
+          <View style={styles.exportContainer}>
+            <TouchableOpacity
+              style={[styles.exportButton, isExporting && styles.exportButtonDisabled]}
+              onPress={handleExport}
+              disabled={isExporting}
+            >
+              {isExporting ? (
+                <>
+                  <ActivityIndicator size="small" color="white" />
+                  <Text style={styles.exportButtonText}>Exporting...</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={20} color="white" />
+                  <Text style={styles.exportButtonText}>Export Data</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
         {teamAnalytics.size === 0 ? (
           renderEmptyState()
         ) : (
@@ -1138,6 +1206,27 @@ const styles = {
     opacity: 0.7,
   },
   syncButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  exportContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  exportButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#ff6600',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  exportButtonDisabled: {
+    opacity: 0.7,
+  },
+  exportButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600' as const,

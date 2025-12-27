@@ -539,7 +539,7 @@ export default function PicklistsScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyPicklist}>
-              <Text style={styles.emptyPicklistText}>Drag teams here</Text>
+              <Text style={styles.emptyPicklistText}>Add teams here</Text>
             </View>
           }
         />
