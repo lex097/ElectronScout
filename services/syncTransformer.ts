@@ -1,15 +1,18 @@
 // services/syncTransformer.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { calculateMatchPoints } from '../config/gameConfig';
 import { MatchData } from '../types/match';
 import { db } from './database';
 import { supabaseSyncService } from './supabase.sync';
+
+const SELECTED_EVENT_KEY = 'selected_event_key';
 
 /**
  * Transform SQLite match to Supabase format
  */
 export class SyncTransformer {
   
-  static transformMatch(sqliteMatch: MatchData): {
+  static transformMatch(sqliteMatch: MatchData, eventKey?: string | null): {
     id: string;
     match_number: number;
     team_number: number;
@@ -18,7 +21,7 @@ export class SyncTransformer {
     calculated_points: number;
     notes?: string;
     timestamp: number;
-    event_id?: string;
+    event_key?: string;
   } {
     // Parse metrics if it's a JSON string
     const metrics = typeof sqliteMatch.metrics === 'string' 
@@ -45,7 +48,7 @@ export class SyncTransformer {
       calculated_points: calculatedPoints,
       notes: sqliteMatch.notes,
       timestamp: sqliteMatch.timestamp,
-      event_id: undefined, // Optional: Add event tracking later
+      event_key: eventKey || undefined,
     };
   }
 
@@ -64,14 +67,14 @@ export class SyncTransformer {
    */
   static async detectDuplicates(
     localMatches: MatchData[],
-    eventId?: string
+    eventKey?: string
   ): Promise<{
     toInsert: MatchData[];
     toUpdate: MatchData[];
     toSkip: MatchData[];
   }> {
     try {
-      const remoteMatches = await supabaseSyncService.getMatches(eventId);
+      const remoteMatches = await supabaseSyncService.getMatches(eventKey);
       const remoteIds = new Set(remoteMatches.map((m: any) => m.id));
 
       const toInsert: MatchData[] = [];
@@ -115,7 +118,18 @@ export class SyncManager {
         return false;
       }
 
-      const transformed = SyncTransformer.transformMatch(match);
+      // Get event_key from selected event
+      let eventKey: string | null = null;
+      try {
+        eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+        console.log('📅 Upload match - event_key from storage:', eventKey);
+      } catch (error) {
+        console.error('Error getting event_key:', error);
+        // Continue without event_key if there's an error
+      }
+
+      const transformed = SyncTransformer.transformMatch(match, eventKey);
+      console.log('📅 Upload match - Transformed match event_key:', transformed.event_key);
 
       if (!SyncTransformer.validateMatch(transformed)) {
         console.error('Invalid match data:', transformed);
@@ -151,7 +165,17 @@ export class SyncManager {
         return { success: 0, failed: matches.length, skipped: 0 };
       }
 
-      const { toInsert, toUpdate, toSkip } = await SyncTransformer.detectDuplicates(matches);
+      // Get event_key from selected event
+      let eventKey: string | null = null;
+      try {
+        eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+        console.log('📅 Batch upload - event_key from storage:', eventKey);
+      } catch (error) {
+        console.error('Error getting event_key:', error);
+        // Continue without event_key if there's an error
+      }
+
+      const { toInsert, toUpdate, toSkip } = await SyncTransformer.detectDuplicates(matches, eventKey || undefined);
 
       console.log(`📊 Batch: ${toInsert.length} new, ${toUpdate.length} updates, ${toSkip.length} skipped`);
 
@@ -160,7 +184,11 @@ export class SyncManager {
 
       // Insert new matches
       if (toInsert.length > 0) {
-        const transformed = toInsert.map(m => SyncTransformer.transformMatch(m));
+        const transformed = toInsert.map(m => SyncTransformer.transformMatch(m, eventKey));
+        console.log('📅 Batch upload - Inserting', transformed.length, 'matches with event_key:', eventKey);
+        if (transformed.length > 0) {
+          console.log('📅 Batch upload - First match event_key:', transformed[0].event_key);
+        }
         const result = await supabaseSyncService.batchInsertMatches(transformed);
         
         const successIds = new Set([...result.insertedIds, ...result.skippedDeletedIds]);
@@ -179,7 +207,7 @@ export class SyncManager {
 
       // Update existing matches
       for (const match of toUpdate) {
-        const transformed = SyncTransformer.transformMatch(match);
+        const transformed = SyncTransformer.transformMatch(match, eventKey);
         const success = await supabaseSyncService.updateMatch(match.id, {
           metrics: transformed.metrics,
           calculated_points: transformed.calculated_points,

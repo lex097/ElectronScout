@@ -101,7 +101,7 @@ export function AdminPanel() {
         String(m.match_number),
         String(m.team_number),
         String(m.scout_name || ''),
-        String(m.event_id || ''),
+        String(m.event_key || ''),
       ];
       return parts.some((p) => p.toLowerCase().includes(q));
     });

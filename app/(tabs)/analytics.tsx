@@ -48,14 +48,18 @@ export default function AnalyticsScreen() {
 
       let matchesToAnalyze: MatchData[] = [];
       
+      // Get event_key from storage for filtering team data
+      const eventKey = await AsyncStorage.getItem('selected_event_key');
+      
       if (dataSource === 'local') {
         // Load from local database
+        // Note: Local database doesn't store event_key, so we can't filter by event
         const allMatches = await db.getAllMatches();
         setMatches(allMatches);
         matchesToAnalyze = allMatches;
       } else {
-        // Load from Supabase
-        const allTeamMatches = await supabaseSyncService.getAllTeamMatches();
+        // Load from Supabase (filtered by team_id and optionally event_key)
+        const allTeamMatches = await supabaseSyncService.getAllTeamMatches(eventKey || undefined);
         setTeamMatches(allTeamMatches);
         matchesToAnalyze = allTeamMatches;
       }

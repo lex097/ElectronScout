@@ -33,34 +33,10 @@ export class PicklistService {
   }
 
   /**
-   * Get event_id from event_key by querying events table
-   */
-  async getEventIdByKey(eventKey: string): Promise<string | null> {
-    try {
-      const { data, error } = await this.getSupabaseClient()
-        .from('events')
-        .select('id')
-        .eq('event_key', eventKey)
-        .maybeSingle(); // Use maybeSingle() to handle 0 rows gracefully
-
-      if (error) {
-        console.error('Failed to get event_id:', error);
-        return null;
-      }
-
-      // If no event found, return null (this is not an error condition)
-      return data?.id || null;
-    } catch (error) {
-      console.error('Error getting event_id from event_key:', error);
-      return null;
-    }
-  }
-
-  /**
    * Fetch picklists from Supabase
    * Returns null on error or timeout
    */
-  async fetchPicklistsFromSupabase(teamId: string, eventId: string | null): Promise<Picklists | null> {
+  async fetchPicklistsFromSupabase(teamId: string, eventKey: string | null): Promise<Picklists | null> {
     try {
       // Create timeout promise
       const timeoutPromise = new Promise<null>((resolve) => {
@@ -76,11 +52,11 @@ export class PicklistService {
             .select('team_rankings')
             .eq('team_id', teamId);
 
-          // Add event_id filter (or IS NULL if eventId is null)
-          if (eventId) {
-            query = query.eq('event_id', eventId);
+          // Add event_key filter (or IS NULL if eventKey is null)
+          if (eventKey) {
+            query = query.eq('event_key', eventKey);
           } else {
-            query = query.is('event_id', null);
+            query = query.is('event_key', null);
           }
 
           const { data, error } = await query.maybeSingle();
@@ -126,7 +102,7 @@ export class PicklistService {
    */
   async savePicklistsToSupabase(
     teamId: string,
-    eventId: string | null,
+    eventKey: string | null,
     picklists: Picklists
   ): Promise<boolean> {
     try {
@@ -146,10 +122,10 @@ export class PicklistService {
         .select('id')
         .eq('team_id', teamId);
 
-      if (eventId) {
-        existingQuery = existingQuery.eq('event_id', eventId);
+      if (eventKey) {
+        existingQuery = existingQuery.eq('event_key', eventKey);
       } else {
-        existingQuery = existingQuery.is('event_id', null);
+        existingQuery = existingQuery.is('event_key', null);
       }
 
       const { data: existing, error: selectError } = await existingQuery.maybeSingle();
@@ -171,10 +147,10 @@ export class PicklistService {
           .update(updateData)
           .eq('team_id', teamId);
 
-        if (eventId) {
-          updateQuery = updateQuery.eq('event_id', eventId);
+        if (eventKey) {
+          updateQuery = updateQuery.eq('event_key', eventKey);
         } else {
-          updateQuery = updateQuery.is('event_id', null);
+          updateQuery = updateQuery.is('event_key', null);
         }
 
         const { error: updateError } = await updateQuery;
@@ -187,7 +163,7 @@ export class PicklistService {
         // Insert new record
         const insertData: any = {
           team_id: teamId,
-          event_id: eventId,
+          event_key: eventKey,
           team_rankings: teamRankingsJson,
           created_by: createdById,
         };
@@ -286,12 +262,8 @@ export class PicklistService {
       return local || { firstPick: [], secondPick: [], doNotPick: [] };
     }
 
-    // Try to get event_id from event_key
-    const eventId = await this.getEventIdByKey(eventKey);
-    // eventId can be null if event doesn't exist in DB yet, that's okay
-
-    // Try Supabase first
-    const supabasePicklists = await this.fetchPicklistsFromSupabase(teamId, eventId);
+    // Try Supabase first (use event_key directly)
+    const supabasePicklists = await this.fetchPicklistsFromSupabase(teamId, eventKey);
     if (supabasePicklists !== null) {
       // Save to local storage as backup
       await this.savePicklistsToLocal(teamNumber, eventKey, supabasePicklists);
@@ -318,11 +290,8 @@ export class PicklistService {
         return;
       }
 
-      const eventId = await this.getEventIdByKey(eventKey);
-      // eventId can be null, that's okay
-
-      // Save to Supabase (non-blocking)
-      this.savePicklistsToSupabase(teamId, eventId, picklists).catch((error) => {
+      // Save to Supabase (non-blocking, use event_key directly)
+      this.savePicklistsToSupabase(teamId, eventKey, picklists).catch((error) => {
         console.error('Error saving picklists to Supabase (non-blocking):', error);
       });
     } catch (error) {

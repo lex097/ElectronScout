@@ -204,7 +204,7 @@ export class SupabaseSyncService {
     calculated_points: number;
     notes?: string;
     timestamp: number;
-    event_id?: string;
+    event_key?: string;
     scout_name?: string;
   }): Promise<boolean> {
     try {
@@ -230,7 +230,7 @@ export class SupabaseSyncService {
       const insertData = {
         id: match.id,
         team_id: teamId, // team_id = the scouting team (team that submitted this data)
-        event_id: match.event_id || null,
+        event_key: match.event_key || null,
         match_number: match.match_number,
         team_number: match.team_number, // team_number = the team being scouted
         scout_name: scoutName,
@@ -241,7 +241,13 @@ export class SupabaseSyncService {
         timestamp: match.timestamp,
       };
       
-      console.log('Inserting match with team_id:', teamId, 'for scouted team:', match.team_number);
+      console.log('📥 Inserting match to Supabase:', {
+        match_id: match.id,
+        team_id: teamId,
+        event_key: insertData.event_key,
+        match_number: match.match_number,
+        team_number: match.team_number,
+      });
       
       // console.log('Inserting to Supabase:', {
       //   id: insertData.id,
@@ -277,7 +283,7 @@ export class SupabaseSyncService {
     calculated_points: number;
     notes?: string;
     timestamp: number;
-    event_id?: string;
+    event_key?: string;
     scout_name?: string;
   }>): Promise<{ insertedIds: string[]; skippedDeletedIds: string[]; failedIds: string[] }> {
     try {
@@ -307,7 +313,7 @@ export class SupabaseSyncService {
         const insertData = filteredBatch.map(m => ({
           id: m.id,
           team_id: teamId, // team_id = the scouting team (team that submitted this data)
-          event_id: m.event_id || null,
+          event_key: m.event_key || null,
           match_number: m.match_number,
           team_number: m.team_number, // team_number = the team being scouted
           scout_name: m.scout_name || scoutName,
@@ -322,7 +328,13 @@ export class SupabaseSyncService {
           continue;
         }
         
-        console.log(`Batch inserting ${insertData.length} matches with team_id:`, teamId);
+        console.log('📥 Batch inserting to Supabase:', {
+          batch_size: insertData.length,
+          team_id: teamId,
+          event_key: insertData[0]?.event_key || null,
+          first_match_id: insertData[0]?.id,
+          sample_event_keys: insertData.slice(0, 3).map(m => m.event_key),
+        });
         
       // console.log('Batch inserting to Supabase:', 
       //   insertData.map(d => ({ 
@@ -385,7 +397,7 @@ export class SupabaseSyncService {
    * Fetch all matches for current team
    * Filters out admin-deleted matches using match_deletions tombstone table
    */
-  async getMatches(eventId?: string): Promise<any[]> {
+  async getMatches(eventKey?: string): Promise<any[]> {
     try {
       const teamId = await this.getTeamId();
       if (!teamId) {
@@ -400,8 +412,8 @@ export class SupabaseSyncService {
         .eq('team_id', teamId)
         .order('match_number', { ascending: true });
 
-      if (eventId) {
-        matchesQuery = matchesQuery.eq('event_id', eventId);
+      if (eventKey) {
+        matchesQuery = matchesQuery.eq('event_key', eventKey);
       }
 
       // Fetch both matches and deletion tombstones in parallel
@@ -468,8 +480,9 @@ export class SupabaseSyncService {
    * Only returns matches where team_id matches the logged-in user's team
    * Returns matches in MatchData format for analytics
    * Filters out admin-deleted matches using match_deletions tombstone table
+   * Optionally filters by event_key if provided
    */
-  async getAllTeamMatches(): Promise<Array<{
+  async getAllTeamMatches(eventKey?: string): Promise<Array<{
     id: string;
     matchNumber: number;
     teamNumber: number;
@@ -487,16 +500,24 @@ export class SupabaseSyncService {
         return [];
       }
       
-      console.log('Fetching matches for team_id:', teamId);
+      console.log('Fetching matches for team_id:', teamId, 'event_key:', eventKey);
+      
+      // Build matches query
+      let matchesQuery = this.getSupabaseClient()
+        .from('matches')
+        .select('*')
+        .eq('team_id', teamId) // Only get matches submitted by this team
+        .order('timestamp', { ascending: false });
+
+      // Filter by event_key if provided
+      if (eventKey) {
+        matchesQuery = matchesQuery.eq('event_key', eventKey);
+      }
       
       // Fetch both matches and deletion tombstones in parallel
       const [{ data: matchesData, error: matchesError }, { data: deletionsData, error: deletionsError }] =
         await Promise.all([
-          this.getSupabaseClient()
-            .from('matches')
-            .select('*')
-            .eq('team_id', teamId) // Only get matches submitted by this team
-            .order('timestamp', { ascending: false }),
+          matchesQuery,
           this.getSupabaseClient()
             .from('match_deletions')
             .select('match_id')

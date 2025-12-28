@@ -36,28 +36,6 @@ export class ExportService {
     return createClient(supabaseUrl!, serviceRoleKey);
   }
 
-  /**
-   * Get event ID from event key
-   */
-  private async getEventIdByKey(eventKey: string): Promise<string | null> {
-    try {
-      const supabase = this.getSupabaseClient();
-      const { data, error } = await supabase
-        .from('events')
-        .select('id')
-        .eq('event_key', eventKey)
-        .maybeSingle();
-
-      if (error || !data) {
-        return null;
-      }
-
-      return data.id;
-    } catch (error) {
-      console.error('Error getting event_id from event_key:', error);
-      return null;
-    }
-  }
 
   /**
    * Escape CSV value (handle commas, quotes, newlines)
@@ -94,17 +72,9 @@ export class ExportService {
    */
   async exportTeamDataToCSV(eventKey?: string): Promise<string | null> {
     try {
-      // Get event ID if event key is provided
-      let eventId: string | undefined;
-      if (eventKey) {
-        const id = await this.getEventIdByKey(eventKey);
-        if (id) {
-          eventId = id;
-        }
-      }
-
       // Fetch matches for current team only (already filtered by team_id)
-      const matches = await supabaseSyncService.getMatches(eventId);
+      // Use event_key directly (no conversion needed)
+      const matches = await supabaseSyncService.getMatches(eventKey);
       
       if (!matches || matches.length === 0) {
         throw new Error('No data to export');

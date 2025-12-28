@@ -9,7 +9,7 @@ export type TeamContext = {
 export type MatchRow = {
   id: string;
   team_id: string;
-  event_id?: string | null;
+  event_key?: string | null;
   match_number: number;
   team_number: number;
   scout_name?: string | null;
@@ -86,7 +86,7 @@ export class AdminService {
         supabase
           .from('matches')
           .select(
-            'id, team_id, event_id, match_number, team_number, scout_name, game_year, metrics, calculated_points, notes, timestamp'
+            'id, team_id, event_key, match_number, team_number, scout_name, game_year, metrics, calculated_points, notes, timestamp'
           )
           .eq('team_id', teamId)
           .order('timestamp', { ascending: false }),
