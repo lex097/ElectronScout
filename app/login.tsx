@@ -1,12 +1,9 @@
 // app/login.tsx - Login Screen
 import { authService } from '@/services/authService';
-import { useAuthStore } from '@/stores/authStore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   StyleSheet,
   Text,
@@ -18,71 +15,56 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
-  const [name, setName] = useState('');
-  const [teamNumber, setTeamNumber] = useState('');
+  const [teamCode, setTeamCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const login = useAuthStore((state) => state.login);
+  const [error, setError] = useState<string | null>(null);
 
   const handleContinue = async () => {
-    if (!name.trim() || !teamNumber.trim()) {
-      Alert.alert('Error', 'Please enter name and team number');
-      return;
-    }
-
-    // Validate team number is numeric
-    const teamNum = parseInt(teamNumber, 10);
-    if (isNaN(teamNum) || teamNum < 1 || teamNum > 9999) {
-      Alert.alert('Error', 'Please enter a valid team number (1-9999)');
+    if (!teamCode.trim() || teamCode.length !== 6) {
+      setError('Please enter a valid 6-character team code');
       return;
     }
 
     setIsLoading(true);
+    setError(null);
+
     try {
-      // Store name in AsyncStorage first (will be used in verification/creation screens)
-      await AsyncStorage.setItem('scout_name', name);
+      // Validate team code
+      const teamId = await authService.validateTeamCode(teamCode.toUpperCase());
 
-      // Search for team by number
-      const teamSearch = await authService.searchTeamByNumber(teamNum);
-
-      if (teamSearch.exists && teamSearch.teamId) {
-        // Team exists - navigate to team code verification
-        router.push({
-          pathname: '/verify-team-code' as any,
-          params: {
-            teamId: teamSearch.teamId,
-            teamNumber: teamNumber,
-          },
-        });
-      } else {
-        // Team doesn't exist - create it
-        try {
-          const { teamCode, adminCode } = await authService.createTeam(teamNum);
-          
-          // Navigate to team created screen with codes (team_code + auto-generated admin_code)
-          router.push({
-            pathname: '/team-created' as any,
-            params: {
-              teamCode: teamCode,
-              teamNumber: teamNumber,
-              adminCode: adminCode,
-            },
-          });
-        } catch (createError) {
-          Alert.alert(
-            'Error',
-            createError instanceof Error ? createError.message : 'Failed to create team. Please try again.'
-          );
-        }
+      if (!teamId) {
+        setError('Invalid team code. Please try again.');
+        setIsLoading(false);
+        return;
       }
+
+      // Get team number from team_id
+      const teamNumber = await authService.getTeamNumberByTeamId(teamId);
+
+      if (!teamNumber) {
+        setError('Unable to retrieve team information. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Navigate to name entry screen
+      router.push({
+        pathname: '/enter-name' as any,
+        params: {
+          teamId: teamId,
+          teamNumber: teamNumber.toString(),
+        },
+      });
     } catch (error) {
       console.error('Login error:', error);
-      Alert.alert(
-        'Error',
-        'Unable to connect. Please check your internet connection and try again.'
-      );
+      setError('Unable to connect. Please check your internet connection and try again.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRegisterTeam = () => {
+    router.push('/register-team' as any);
   };
 
   return (
@@ -94,49 +76,29 @@ export default function LoginScreen() {
 
           <View style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Name</Text>
+              <Text style={styles.label}>Team Code</Text>
               <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Enter name"
-                placeholderTextColor="#888"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-                returnKeyType="next"
-                onSubmitEditing={() => {
-                  // Focus next input or dismiss keyboard
-                  Keyboard.dismiss();
+                style={[styles.input, error && styles.inputError]}
+                value={teamCode}
+                onChangeText={(text) => {
+                  setTeamCode(text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                  setError(null);
                 }}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Team Number</Text>
-              <TextInput
-                style={styles.input}
-                value={teamNumber}
-                onChangeText={setTeamNumber}
-                placeholder="Enter team number"
+                placeholder="ABC123"
                 placeholderTextColor="#888"
-                keyboardType="number-pad"
-                autoCapitalize="none"
+                autoCapitalize="characters"
                 autoCorrect={false}
+                maxLength={6}
                 editable={!isLoading}
                 returnKeyType="done"
-                onSubmitEditing={() => {
-                  Keyboard.dismiss();
-                  if (name.trim() && teamNumber.trim()) {
-                    handleContinue();
-                  }
-                }}
+                onSubmitEditing={handleContinue}
               />
+              {error && <Text style={styles.errorText}>{error}</Text>}
             </View>
 
             <View style={styles.buttonContainer}>
               <TouchableOpacity
-                style={[styles.button, styles.continueButton]}
+                style={[styles.button, styles.continueButton, isLoading && styles.buttonDisabled]}
                 onPress={handleContinue}
                 disabled={isLoading}
               >
@@ -145,6 +107,14 @@ export default function LoginScreen() {
                 ) : (
                   <Text style={styles.buttonText}>Continue</Text>
                 )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.registerButton, isLoading && styles.buttonDisabled]}
+                onPress={handleRegisterTeam}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>Register a team</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -193,10 +163,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2a2a',
     borderRadius: 8,
     padding: 12,
-    fontSize: 16,
+    fontSize: 24,
+    fontWeight: '600',
+    letterSpacing: 4,
+    textAlign: 'center',
     borderWidth: 1,
     borderColor: '#404040',
+    textTransform: 'uppercase',
     color: '#fff',
+  },
+  inputError: {
+    borderColor: '#ef4444',
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 14,
+    marginTop: 8,
   },
   buttonContainer: {
     marginTop: 24,
@@ -211,6 +193,14 @@ const styles = StyleSheet.create({
   },
   continueButton: {
     backgroundColor: '#ff6600',
+  },
+  registerButton: {
+    backgroundColor: '#404040',
+    borderWidth: 1,
+    borderColor: '#ff6600',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   buttonText: {
     color: 'white',

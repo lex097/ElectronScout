@@ -74,10 +74,18 @@ function RootLayoutNav() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={{ headerShown: false, gestureEnabled: false }}>
-          <Stack.Screen name="login" />
-          <Stack.Screen name="verify-team-code" />
-          <Stack.Screen name="create-admin-code" />
-          <Stack.Screen name="team-created" />
+          <Stack.Screen 
+            name="login" 
+            options={{ 
+              gestureEnabled: true,
+              animationTypeForReplace: 'pop',
+            }} 
+          />
+          <Stack.Screen name="register-team" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="enter-name" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="verify-team-code" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="create-admin-code" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="team-created" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-event" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-match" options={{ gestureEnabled: true }} />
           <Stack.Screen name="select-team" />

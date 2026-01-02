@@ -1,5 +1,4 @@
 // app/team-created.tsx - Team Creation Success Screen
-import { useAuthStore } from '@/stores/authStore';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,23 +6,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function TeamCreatedScreen() {
   const params = useLocalSearchParams<{ teamCode: string; teamNumber: string; adminCode?: string }>();
   const { teamCode, teamNumber, adminCode } = params;
-  const getScoutName = useAuthStore((state) => state.getScoutName);
 
   const handleContinue = async () => {
-    // Get scout name from AsyncStorage (should be set in login screen)
-    const scoutName = await getScoutName();
-    if (!scoutName) {
-      // If scout name is missing, go back to login
-      router.replace('/login');
-      return;
-    }
-
-    // Complete authentication
-    const login = useAuthStore.getState().login;
-    await login(scoutName, teamNumber);
-
-    // Navigate to main app
-    router.replace('/(tabs)');
+    // Navigate to name entry screen
+    router.push({
+      pathname: '/enter-name' as any,
+      params: {
+        teamNumber: teamNumber,
+      },
+    });
   };
 
   return (

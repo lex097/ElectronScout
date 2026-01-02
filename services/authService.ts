@@ -197,6 +197,29 @@ export class AuthService {
   }
 
   /**
+   * Get team number by team_id
+   */
+  async getTeamNumberByTeamId(teamId: string): Promise<number | null> {
+    try {
+      const { data, error } = await this.getSupabaseClient()
+        .from('teams')
+        .select('team_number')
+        .eq('id', teamId)
+        .single();
+
+      if (error || !data) {
+        console.error('Error getting team number:', error);
+        return null;
+      }
+
+      return data.team_number || null;
+    } catch (error) {
+      console.error('Error getting team number:', error);
+      return null;
+    }
+  }
+
+  /**
    * Validate admin code format (4 digits)
    */
   private validateAdminCodeFormat(adminCode: string): boolean {
