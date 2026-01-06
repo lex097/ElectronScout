@@ -19,18 +19,27 @@ export default {
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     splash: {
-      image: "./assets/images/splash-icon.png",
+      image: "./assets/splash-icons/splash-icon-light.png",
       resizeMode: "contain",
-      backgroundColor: "#ffffff"
+      backgroundColor: "#1a1a1a",
+      dark: {
+        image: "./assets/splash-icons/splash-icon-light.png",
+        backgroundColor: "#1a1a1a"
+      }
     },
     ios: {
       bundleIdentifier: "com.valencerobotics.electronscout",
-      supportsTablet: true
+      supportsTablet: true,
+      "icon": {
+        "dark": "./assets/ios-icons/ios-dark.png",
+        "light": "./assets/ios-icons/ios-light.png",
+        "tinted": "./assets/ios-icons/ios-tinted.png"
+      }
     },
     android: {
       package: "com.valencerobotics.electronscout",
       adaptiveIcon: {
-        foregroundImage: "./assets/images/adaptive-icon.png",
+        foregroundImage: "./assets/images/adaptive-icon.png", 
         backgroundColor: "#ffffff"
       },
       edgeToEdgeEnabled: true,
