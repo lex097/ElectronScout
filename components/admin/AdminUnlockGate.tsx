@@ -97,7 +97,7 @@ export function AdminUnlockGate() {
         <AdminCodeInput
           disabled={isVerifying || !teamNumber}
           error={error}
-          helperText={`Forgot your code? Contact support at [PLACEHOLDER_EMAIL]`}
+          helperText={`Forgot your code? Contact support at help.electronscout@gmail.com`}
           onSubmit={handleSubmit}
         />
 
