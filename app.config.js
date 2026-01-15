@@ -45,17 +45,18 @@ export default {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false
     },
-    web: {
-      bundler: "metro",
-      output: "static",
-      favicon: "./assets/images/favicon.png"
-    },
     plugins: [
       "expo-router",
       "expo-sqlite"
     ],
     experiments: {
       typedRoutes: true
+    },
+    updates: {
+      url: "https://u.expo.dev/753b98be-adbc-44ff-ad33-8da220a6b540"
+    },
+    runtimeVersion: {
+      policy: "appVersion"
     }
   }
 };
