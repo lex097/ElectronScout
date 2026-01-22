@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { RapidCounterInput } from '../../components/RapidCounterInput';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
 import { useAuthStore } from '../../stores/authStore';
@@ -145,6 +146,16 @@ export default function MatchScoutScreen() {
               <Text style={styles.maxLabel}>Max: {metric.max}</Text>
             )}
           </View>
+        );
+
+      case 'rapidCounter':
+        return (
+          <RapidCounterInput
+            key={metric.id}
+            metric={metric}
+            value={value}
+            onValueChange={(newValue) => updateMetric(metric.id, newValue)}
+          />
         );
 
       case 'boolean':
