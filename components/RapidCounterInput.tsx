@@ -8,6 +8,7 @@ interface RapidCounterInputProps {
   metric: Metric;
   value: number;
   onValueChange: (value: number) => void;
+  onExpandedChange?: (isExpanded: boolean) => void;
 }
 
 const INITIAL_SIZE = 60;
@@ -20,6 +21,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   metric,
   value,
   onValueChange,
+  onExpandedChange,
 }) => {
   const minRate = metric.minRate ?? DEFAULT_MIN_RATE;
   const maxRate = metric.maxRate ?? DEFAULT_MAX_RATE;
@@ -40,6 +42,10 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startYRef = useRef(0);
   const isExpandedRef = useRef(false);
+  const containerRef = useRef<View>(null);
+  const containerLayout = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasExpandedRef = useRef(false);
   
   // Keep valueRef in sync with prop
   useEffect(() => {
@@ -214,77 +220,171 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false, // Don't allow other components to take over
+      onShouldBlockNativeResponder: () => true, // Block native scroll when active
       onPanResponderGrant: (evt, gestureState) => {
-        startYRef.current = evt.nativeEvent.pageY;
+        hasExpandedRef.current = false;
         
-        // Expand
-        setIsExpanded(true);
-        isExpandedRef.current = true;
-        Animated.parallel([
-          Animated.spring(expandAnim, {
-            toValue: EXPANDED_HEIGHT,
-            useNativeDriver: false,
-            tension: 50,
-            friction: 7,
-          }),
-          Animated.spring(widthAnim, {
-            toValue: EXPANDED_WIDTH,
-            useNativeDriver: false,
-            tension: 50,
-            friction: 7,
-          }),
-          Animated.spring(borderRadiusAnim, {
-            toValue: EXPANDED_WIDTH / 2,
-            useNativeDriver: false,
-            tension: 50,
-            friction: 7,
-          }),
-        ]).start();
+        // Measure container position
+        containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+          containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          startYRef.current = evt.nativeEvent.pageY;
+        });
         
-        // Set initial rate to middle
-        currentRateRef.current = (minRate + maxRate) / 2;
-        setDisplayRate(currentRateRef.current);
-        indicatorPositionAnim.setValue(0.5);
-        
-        // Start incrementing
-        isActiveRef.current = true;
-        let lastIncrementTime = Date.now();
-        
-        if (intervalIdRef.current) {
-          clearInterval(intervalIdRef.current);
-        }
-        
-        intervalIdRef.current = setInterval(() => {
-          if (!isActiveRef.current) return;
+        // Start long press timer (0.3 seconds)
+        longPressTimerRef.current = setTimeout(() => {
+          // Long press detected - expand panel
+          hasExpandedRef.current = true;
           
-          const now = Date.now();
-          const rate = currentRateRef.current;
-          const intervalMs = 1000 / rate;
+          // Initial haptic feedback when expanding
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
           
-          if (now - lastIncrementTime >= intervalMs) {
-            const currentValue = valueRef.current;
-            const newValue = currentValue + 1;
-            
-            if (!metric.max || newValue <= metric.max) {
-              valueRef.current = newValue;
-              onValueChange(newValue);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }
-            lastIncrementTime = now;
+          // Expand
+          setIsExpanded(true);
+          isExpandedRef.current = true;
+          onExpandedChange?.(true);
+          Animated.parallel([
+            Animated.spring(expandAnim, {
+              toValue: EXPANDED_HEIGHT,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+            Animated.spring(widthAnim, {
+              toValue: EXPANDED_WIDTH,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+            Animated.spring(borderRadiusAnim, {
+              toValue: EXPANDED_WIDTH / 2,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+          ]).start(() => {
+            // Re-measure after expansion animation completes
+            containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+              containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+            });
+          });
+          
+          // Set initial rate to middle
+          currentRateRef.current = (minRate + maxRate) / 2;
+          setDisplayRate(currentRateRef.current);
+          indicatorPositionAnim.setValue(0.5);
+          
+          // Start incrementing
+          isActiveRef.current = true;
+          let lastIncrementTime = Date.now();
+          
+          if (intervalIdRef.current) {
+            clearInterval(intervalIdRef.current);
           }
-        }, 16);
+          
+          intervalIdRef.current = setInterval(() => {
+            if (!isActiveRef.current) {
+              if (intervalIdRef.current) {
+                clearInterval(intervalIdRef.current);
+                intervalIdRef.current = null;
+              }
+              return;
+            }
+            
+            const now = Date.now();
+            const rate = currentRateRef.current;
+            const intervalMs = Math.max(16, 1000 / rate); // Ensure minimum 16ms
+            
+            if (now - lastIncrementTime >= intervalMs) {
+              const currentValue = valueRef.current;
+              const newValue = currentValue + 1;
+              
+              if (!metric.max || newValue <= metric.max) {
+                valueRef.current = newValue;
+                onValueChange(newValue);
+                // Trigger haptic feedback on each increment
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
+                  // Silently fail if haptics not available (e.g., on simulator)
+                });
+              } else {
+                // Hit max, stop incrementing
+                isActiveRef.current = false;
+                if (intervalIdRef.current) {
+                  clearInterval(intervalIdRef.current);
+                  intervalIdRef.current = null;
+                }
+              }
+              lastIncrementTime = now;
+            }
+          }, 16);
+        }, 150); // 0.15 seconds = 150ms
       },
       onPanResponderMove: (evt, gestureState) => {
-        const dy = gestureState.dy;
-        const position = 0.5 - (dy / 300);
-        const clampedPosition = Math.max(0, Math.min(1, position));
+        // Only handle movement if panel has expanded (long press occurred)
+        if (!hasExpandedRef.current) {
+          return;
+        }
         
-        const newRate = minRate + (maxRate - minRate) * clampedPosition;
-        currentRateRef.current = newRate;
-        setDisplayRate(newRate);
-        indicatorPositionAnim.setValue(clampedPosition);
+        // Always try to measure container if not measured yet
+        if (containerLayout.current.y === 0) {
+          containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+            containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          });
+        }
+        
+        // Use absolute touch position relative to container
+        const touchY = evt.nativeEvent.pageY;
+        const containerTop = containerLayout.current.y;
+        const containerHeight = EXPANDED_HEIGHT;
+        
+        if (containerTop > 0 && containerHeight > 0) {
+          // Calculate relative position within container (0 = top, 1 = bottom)
+          const relativeY = touchY - containerTop;
+          const normalizedPosition = relativeY / containerHeight;
+          
+          // Invert: 0 = bottom (min rate), 1 = top (max rate)
+          const position = 1 - normalizedPosition;
+          const clampedPosition = Math.max(0, Math.min(1, position));
+          
+          const newRate = minRate + (maxRate - minRate) * clampedPosition;
+          currentRateRef.current = newRate;
+          setDisplayRate(newRate);
+          indicatorPositionAnim.setValue(clampedPosition);
+        } else {
+          // Fallback: use dy relative to start position
+          // dy is negative when moving up, positive when moving down
+          // Start at 0.5 (middle), subtract normalized dy
+          const dy = gestureState.dy;
+          const position = 0.5 - (dy / EXPANDED_HEIGHT);
+          const clampedPosition = Math.max(0, Math.min(1, position));
+          
+          const newRate = minRate + (maxRate - minRate) * clampedPosition;
+          currentRateRef.current = newRate;
+          setDisplayRate(newRate);
+          indicatorPositionAnim.setValue(clampedPosition);
+        }
       },
       onPanResponderRelease: () => {
+        // Clear long press timer if it hasn't fired yet
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        
+        // If panel didn't expand (quick press), just increment by 1
+        if (!hasExpandedRef.current) {
+          const currentValue = valueRef.current;
+          const newValue = currentValue + 1;
+          if (!metric.max || newValue <= metric.max) {
+            onValueChange(newValue);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
+          return;
+        }
+        
+        // Panel was expanded, so collapse it
         isActiveRef.current = false;
         if (intervalIdRef.current) {
           clearInterval(intervalIdRef.current);
@@ -293,6 +393,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         
         // Collapse
         isExpandedRef.current = false;
+        hasExpandedRef.current = false;
         Animated.parallel([
           Animated.spring(expandAnim, {
             toValue: INITIAL_SIZE,
@@ -314,9 +415,27 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           }),
         ]).start(() => {
           setIsExpanded(false);
+          onExpandedChange?.(false);
         });
       },
       onPanResponderTerminate: () => {
+        // Clear long press timer if it hasn't fired yet
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        
+        // If panel didn't expand (quick press), just increment by 1
+        if (!hasExpandedRef.current) {
+          const currentValue = valueRef.current;
+          const newValue = currentValue + 1;
+          if (!metric.max || newValue <= metric.max) {
+            onValueChange(newValue);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
+          return;
+        }
+        
         isActiveRef.current = false;
         if (intervalIdRef.current) {
           clearInterval(intervalIdRef.current);
@@ -324,6 +443,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         }
         
         isExpandedRef.current = false;
+        hasExpandedRef.current = false;
         Animated.parallel([
           Animated.spring(expandAnim, {
             toValue: INITIAL_SIZE,
@@ -345,6 +465,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           }),
         ]).start(() => {
           setIsExpanded(false);
+          onExpandedChange?.(false);
         });
       },
     })
@@ -355,6 +476,9 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
     return () => {
       if (intervalIdRef.current) {
         clearInterval(intervalIdRef.current);
+      }
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
       }
     };
   }, []);
@@ -385,6 +509,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
 
         {/* Rapid counter button */}
         <Animated.View
+          ref={containerRef}
           style={[
             styles.rapidCounterContainer,
             {

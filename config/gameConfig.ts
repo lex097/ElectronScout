@@ -189,7 +189,7 @@ export const GAME_2026: GameConfig = {
             {
               id: "fuelPass",
               type: "rapidCounter",
-              label: "Fuel Scored",
+              label: "Fuel Passed",
               points: 0,
               defaultValue: 0,
               minRate: 2,

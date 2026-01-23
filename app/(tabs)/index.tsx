@@ -33,6 +33,7 @@ export default function MatchScoutScreen() {
   const [metrics, setMetrics] = useState(getInitialMatchData());
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isRapidCounterExpanded, setIsRapidCounterExpanded] = useState(false);
   const getScoutName = useAuthStore((state) => state.getScoutName);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
@@ -155,6 +156,7 @@ export default function MatchScoutScreen() {
             metric={metric}
             value={value}
             onValueChange={(newValue) => updateMetric(metric.id, newValue)}
+            onExpandedChange={setIsRapidCounterExpanded}
           />
         );
 
@@ -276,6 +278,8 @@ export default function MatchScoutScreen() {
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.content}
+        scrollEnabled={!isRapidCounterExpanded}
+        nestedScrollEnabled={!isRapidCounterExpanded}
       >
         {/* Match Info */}
         {isTBAMode ? (
