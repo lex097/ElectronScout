@@ -2,9 +2,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Dimensions, NativeScrollEvent, NativeSyntheticEvent, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { db } from '../../services/database';
@@ -34,6 +34,9 @@ export default function MatchScoutScreen() {
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isRapidCounterExpanded, setIsRapidCounterExpanded] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef<number>(0); // Track current scroll position
+  const insets = useSafeAreaInsets();
   const getScoutName = useAuthStore((state) => state.getScoutName);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
@@ -157,6 +160,11 @@ export default function MatchScoutScreen() {
             value={value}
             onValueChange={(newValue) => updateMetric(metric.id, newValue)}
             onExpandedChange={setIsRapidCounterExpanded}
+            onExpand={(pageY, height) => {
+              // pageY is the absolute screen position of the panel after expansion
+              // height is the expanded panel height (300)
+              handleRapidCounterExpand(pageY, height);
+            }}
           />
         );
 
@@ -209,6 +217,41 @@ export default function MatchScoutScreen() {
         return null;
     }
   };
+
+  const handleRapidCounterExpand = useCallback((pageY: number, containerHeight: number) => {
+    // pageY is the absolute screen position of the panel after expansion
+    // containerHeight is the expanded panel height (300)
+    
+    if (scrollViewRef.current) {
+      const threshold = 50; // Distance from bottom of visible area to keep panel bottom visible
+      
+      // Calculate the visible area on screen
+      const screenHeight = Dimensions.get('window').height;
+      const tabBarHeight = 49 + insets.bottom; // Tab bar is typically 49px + safe area bottom
+      const headerHeight = 44 + insets.top; // Header is typically 44px + safe area top (but we use edges={[]} so might be 0)
+      
+      // The visible bottom of the ScrollView on screen (above the tab bar)
+      const visibleBottom = screenHeight - tabBarHeight;
+      
+      // The panel's bottom position on screen
+      const panelBottomScreen = pageY + containerHeight;
+      
+      // Check if panel bottom is below the visible area
+      if (panelBottomScreen > visibleBottom - threshold) {
+        // Calculate how much we need to scroll down
+        const scrollNeeded = panelBottomScreen - (visibleBottom - threshold);
+        
+        // Get current scroll position and add the delta
+        const currentScrollY = scrollYRef.current;
+        const newScrollY = currentScrollY + scrollNeeded;
+        
+        scrollViewRef.current?.scrollTo({
+          y: newScrollY,
+          animated: true,
+        });
+      }
+    }
+  }, [insets.bottom, insets.top]);
 
   const handleSave = async () => {
     if (!teamNumber || !matchNumber) {
@@ -276,10 +319,16 @@ export default function MatchScoutScreen() {
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView 
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         scrollEnabled={!isRapidCounterExpanded}
         nestedScrollEnabled={!isRapidCounterExpanded}
+        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+          // Track current scroll position for auto-scroll calculations
+          scrollYRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
       >
         {/* Match Info */}
         {isTBAMode ? (

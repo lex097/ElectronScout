@@ -2,13 +2,14 @@
 import { Metric } from '@/config/gameConfig';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, GestureResponderEvent, PanResponder, PanResponderGestureState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface RapidCounterInputProps {
   metric: Metric;
   value: number;
   onValueChange: (value: number) => void;
   onExpandedChange?: (isExpanded: boolean) => void;
+  onExpand?: (y: number, height: number) => void;
 }
 
 const INITIAL_SIZE = 60;
@@ -22,6 +23,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   value,
   onValueChange,
   onExpandedChange,
+  onExpand,
 }) => {
   const minRate = metric.minRate ?? DEFAULT_MIN_RATE;
   const maxRate = metric.maxRate ?? DEFAULT_MAX_RATE;
@@ -39,13 +41,14 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   const valueRef = useRef(value);
   const isActiveRef = useRef(false);
   const currentRateRef = useRef((minRate + maxRate) / 2);
-  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const incrementTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startYRef = useRef(0);
   const isExpandedRef = useRef(false);
   const containerRef = useRef<View>(null);
   const containerLayout = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasExpandedRef = useRef(false);
+  const activationIdRef = useRef(0); // Unique ID for each activation to prevent stale callbacks
   
   // Keep valueRef in sync with prop
   useEffect(() => {
@@ -72,148 +75,83 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [metric.max, onValueChange]);
 
-  // Start the increment interval
-  const startIncrementInterval = useCallback(() => {
-    if (intervalIdRef.current) {
-      clearInterval(intervalIdRef.current);
+  // Track state update scheduling
+  const stateUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastIncrementTimeRef = useRef(0);
+  const animationFrameRef = useRef<number | null>(null);
+  
+  // Flush pending value to React state (throttled)
+  const flushValueToState = useCallback(() => {
+    if (stateUpdateTimeoutRef.current) return; // Already scheduled
+    
+    stateUpdateTimeoutRef.current = setTimeout(() => {
+      stateUpdateTimeoutRef.current = null;
+      onValueChange(valueRef.current);
+    }, 50); // Update React state at most every 50ms
+  }, [onValueChange]);
+  
+  // Use requestAnimationFrame-based loop for smoother, more consistent timing
+  const runIncrementLoop = useCallback((activationId: number) => {
+    if (!isActiveRef.current || activationId !== activationIdRef.current) {
+      return;
     }
     
-    isActiveRef.current = true;
+    const now = performance.now();
+    const rate = currentRateRef.current;
+    const intervalMs = 1000 / rate;
     
-    // Use setInterval with dynamic rate checking
-    intervalIdRef.current = setInterval(() => {
-      if (!isActiveRef.current) return;
+    // Check if enough time has passed for an increment
+    if (now - lastIncrementTimeRef.current >= intervalMs) {
+      const currentValue = valueRef.current;
+      const newValue = currentValue + 1;
       
-      const rate = currentRateRef.current;
-      const intervalMs = 1000 / rate;
-      
-      // Check if enough time has passed for this rate
-      doIncrement();
-    }, 50); // Check every 50ms, but only increment based on rate
-    
-    // Actually, let's use a better approach - track time and rate
-    let lastIncrementTime = Date.now();
-    
-    if (intervalIdRef.current) {
-      clearInterval(intervalIdRef.current);
-    }
-    
-    intervalIdRef.current = setInterval(() => {
-      if (!isActiveRef.current) return;
-      
-      const now = Date.now();
-      const rate = currentRateRef.current;
-      const intervalMs = 1000 / rate;
-      
-      if (now - lastIncrementTime >= intervalMs) {
-        doIncrement();
-        lastIncrementTime = now;
+      if (!metric.max || newValue <= metric.max) {
+        // Fire haptic FIRST - highest priority
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        
+        // Update internal ref
+        valueRef.current = newValue;
+        lastIncrementTimeRef.current = now;
+        
+        // Throttle React state updates
+        flushValueToState();
+      } else {
+        // Hit max, stop
+        isActiveRef.current = false;
+        onValueChange(valueRef.current);
+        return;
       }
-    }, 16); // ~60fps checking
-  }, [doIncrement]);
-
-  // Stop the increment interval
-  const stopIncrementInterval = useCallback(() => {
-    isActiveRef.current = false;
-    if (intervalIdRef.current) {
-      clearInterval(intervalIdRef.current);
-      intervalIdRef.current = null;
     }
-  }, []);
-
-  // Expand animation
-  const expand = useCallback(() => {
-    setIsExpanded(true);
-    isExpandedRef.current = true;
-    Animated.parallel([
-      Animated.spring(expandAnim, {
-        toValue: EXPANDED_HEIGHT,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-      Animated.spring(widthAnim, {
-        toValue: EXPANDED_WIDTH,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-      Animated.spring(borderRadiusAnim, {
-        toValue: EXPANDED_WIDTH / 2,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-    ]).start();
-  }, [expandAnim, widthAnim, borderRadiusAnim]);
-
-  // Collapse animation
-  const collapse = useCallback(() => {
-    isExpandedRef.current = false;
-    Animated.parallel([
-      Animated.spring(expandAnim, {
-        toValue: INITIAL_SIZE,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-      Animated.spring(widthAnim, {
-        toValue: INITIAL_SIZE,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-      Animated.spring(borderRadiusAnim, {
-        toValue: INITIAL_SIZE / 2,
-        useNativeDriver: false,
-        tension: 50,
-        friction: 7,
-      }),
-    ]).start(() => {
-      setIsExpanded(false);
-    });
-  }, [expandAnim, widthAnim, borderRadiusAnim]);
-
-  // Pan responder handlers
-  const handlePanGrant = useCallback((evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
-    // Record starting Y position
-    startYRef.current = evt.nativeEvent.pageY;
     
-    // Expand the panel
-    expand();
-    
-    // Start incrementing at middle rate
-    currentRateRef.current = (minRate + maxRate) / 2;
-    setDisplayRate(currentRateRef.current);
-    indicatorPositionAnim.setValue(0.5);
-    
-    // Start increment interval
-    startIncrementInterval();
-  }, [expand, startIncrementInterval, minRate, maxRate, indicatorPositionAnim]);
+    // Schedule next frame
+    animationFrameRef.current = requestAnimationFrame(() => runIncrementLoop(activationId));
+  }, [metric.max, onValueChange, flushValueToState]);
+  
+  // Start the increment loop
+  const startIncrementLoop = useCallback((activationId: number) => {
+    lastIncrementTimeRef.current = performance.now();
+    isActiveRef.current = true;
+    runIncrementLoop(activationId);
+  }, [runIncrementLoop]);
 
-  const handlePanMove = useCallback((evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
-    // Use dy (delta Y from start) to calculate rate
-    // Negative dy = finger moved up = higher rate
-    // Positive dy = finger moved down = lower rate
-    const dy = gestureState.dy;
-    
-    // Map dy to position (0-1)
-    // Moving up 150px = position 1 (max rate)
-    // Moving down 150px = position 0 (min rate)
-    const position = 0.5 - (dy / 300); // 300px total range
-    const clampedPosition = Math.max(0, Math.min(1, position));
-    
-    // Update rate
-    const newRate = getRateFromPosition(clampedPosition);
-    currentRateRef.current = newRate;
-    setDisplayRate(newRate);
-    indicatorPositionAnim.setValue(clampedPosition);
-  }, [getRateFromPosition, indicatorPositionAnim]);
-
-  const handlePanRelease = useCallback(() => {
-    stopIncrementInterval();
-    collapse();
-  }, [stopIncrementInterval, collapse]);
+  // Stop the increment loop and flush final value
+  const stopIncrementLoop = useCallback(() => {
+    isActiveRef.current = false;
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (incrementTimeoutRef.current) {
+      clearTimeout(incrementTimeoutRef.current);
+      incrementTimeoutRef.current = null;
+    }
+    if (stateUpdateTimeoutRef.current) {
+      clearTimeout(stateUpdateTimeoutRef.current);
+      stateUpdateTimeoutRef.current = null;
+    }
+    // Flush final value immediately
+    onValueChange(valueRef.current);
+  }, [onValueChange]);
 
   // Create pan responder
   const panResponder = useRef(
@@ -225,7 +163,44 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
       onPanResponderTerminationRequest: () => false, // Don't allow other components to take over
       onShouldBlockNativeResponder: () => true, // Block native scroll when active
       onPanResponderGrant: (evt, gestureState) => {
+        // Increment activation ID - this invalidates any callbacks from previous activations
+        activationIdRef.current += 1;
+        const currentActivationId = activationIdRef.current;
+        
         hasExpandedRef.current = false;
+        
+        // Clear any pending long press timer from previous activation
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        
+        // Stop any running animations from previous activation
+        expandAnim.stopAnimation();
+        widthAnim.stopAnimation();
+        borderRadiusAnim.stopAnimation();
+        
+        // Reset to collapsed state immediately if there was a previous activation
+        expandAnim.setValue(INITIAL_SIZE);
+        widthAnim.setValue(INITIAL_SIZE);
+        borderRadiusAnim.setValue(INITIAL_SIZE / 2);
+        setIsExpanded(false);
+        onExpandedChange?.(false); // Notify parent to re-enable scrolling
+        
+        // Clear any running loops/timeouts from previous activation
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        if (incrementTimeoutRef.current) {
+          clearTimeout(incrementTimeoutRef.current);
+          incrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        isActiveRef.current = false;
         
         // Measure container position
         containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
@@ -233,13 +208,52 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           startYRef.current = evt.nativeEvent.pageY;
         });
         
-        // Start long press timer (0.3 seconds)
+        // Start long press timer (0.15 seconds)
         longPressTimerRef.current = setTimeout(() => {
+          // Check if this activation is still valid
+          if (currentActivationId !== activationIdRef.current) {
+            return; // Stale activation, ignore
+          }
           // Long press detected - expand panel
           hasExpandedRef.current = true;
           
           // Initial haptic feedback when expanding
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          
+          // Set default initial rate and indicator SYNCHRONOUSLY (before async measure)
+          // This ensures we always have valid values even if measure fails
+          const defaultRate = (minRate + maxRate) / 2;
+          currentRateRef.current = defaultRate;
+          setDisplayRate(defaultRate);
+          indicatorPositionAnim.setValue(0.5);
+          
+          // Measure IMMEDIATELY before animation starts to get current position
+          // The panel expands from its top, so pageY stays the same
+          containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+            // Only use measurements if they're valid (pageY can be 0 if at top of screen, that's ok)
+            if (typeof pageY === 'number' && typeof pageX === 'number' && !isNaN(pageY) && !isNaN(pageX)) {
+              containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+              
+              // Calculate initial indicator position based on where finger currently is
+              // startYRef.current has the finger's screen position from onPanResponderGrant
+              const fingerY = startYRef.current;
+              const relativeY = fingerY - pageY;
+              const normalizedPosition = relativeY / EXPANDED_HEIGHT;
+              const clampedPosition = Math.max(0, Math.min(1, 1 - normalizedPosition));
+              
+              // Set initial rate and indicator based on finger position
+              const initialRate = minRate + (maxRate - minRate) * clampedPosition;
+              currentRateRef.current = initialRate;
+              setDisplayRate(initialRate);
+              indicatorPositionAnim.setValue(clampedPosition);
+              
+              // Notify parent to scroll IMMEDIATELY - don't wait for animation
+              // The panel will expand to EXPANDED_HEIGHT from the current pageY
+              if (onExpand) {
+                onExpand(pageY, EXPANDED_HEIGHT);
+              }
+            }
+          });
           
           // Expand
           setIsExpanded(true);
@@ -265,60 +279,26 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
               friction: 7,
             }),
           ]).start(() => {
-            // Re-measure after expansion animation completes
+            // Check if this activation is still valid before re-measuring
+            if (currentActivationId !== activationIdRef.current) {
+              return;
+            }
+            // Re-measure after expansion animation completes for accurate dragging
             containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
               containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
             });
           });
           
-          // Set initial rate to middle
-          currentRateRef.current = (minRate + maxRate) / 2;
-          setDisplayRate(currentRateRef.current);
-          indicatorPositionAnim.setValue(0.5);
-          
-          // Start incrementing
+          // Start incrementing with precise setTimeout-based timing
           isActiveRef.current = true;
-          let lastIncrementTime = Date.now();
           
-          if (intervalIdRef.current) {
-            clearInterval(intervalIdRef.current);
+          // Clear any existing timeout
+          if (incrementTimeoutRef.current) {
+            clearTimeout(incrementTimeoutRef.current);
           }
           
-          intervalIdRef.current = setInterval(() => {
-            if (!isActiveRef.current) {
-              if (intervalIdRef.current) {
-                clearInterval(intervalIdRef.current);
-                intervalIdRef.current = null;
-              }
-              return;
-            }
-            
-            const now = Date.now();
-            const rate = currentRateRef.current;
-            const intervalMs = Math.max(16, 1000 / rate); // Ensure minimum 16ms
-            
-            if (now - lastIncrementTime >= intervalMs) {
-              const currentValue = valueRef.current;
-              const newValue = currentValue + 1;
-              
-              if (!metric.max || newValue <= metric.max) {
-                valueRef.current = newValue;
-                onValueChange(newValue);
-                // Trigger haptic feedback on each increment
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
-                  // Silently fail if haptics not available (e.g., on simulator)
-                });
-              } else {
-                // Hit max, stop incrementing
-                isActiveRef.current = false;
-                if (intervalIdRef.current) {
-                  clearInterval(intervalIdRef.current);
-                  intervalIdRef.current = null;
-                }
-              }
-              lastIncrementTime = now;
-            }
-          }, 16);
+          // Schedule first increment
+          startIncrementLoop(currentActivationId);
         }, 150); // 0.15 seconds = 150ms
       },
       onPanResponderMove: (evt, gestureState) => {
@@ -327,19 +307,22 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           return;
         }
         
-        // Always try to measure container if not measured yet
-        if (containerLayout.current.y === 0) {
-          containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+        // ALWAYS re-measure container position on every move event
+        // This is crucial because scrolling changes the panel's screen position
+        containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+          // Accept pageY >= 0 (0 is valid if at top of screen), just check it's a real number
+          if (typeof pageY === 'number' && !isNaN(pageY) && typeof pageX === 'number' && !isNaN(pageX)) {
             containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
-          });
-        }
+          }
+        });
         
         // Use absolute touch position relative to container
         const touchY = evt.nativeEvent.pageY;
         const containerTop = containerLayout.current.y;
         const containerHeight = EXPANDED_HEIGHT;
         
-        if (containerTop > 0 && containerHeight > 0) {
+        // Accept containerTop >= 0 (0 is valid if at top of screen)
+        if (typeof containerTop === 'number' && !isNaN(containerTop) && containerHeight > 0) {
           // Calculate relative position within container (0 = top, 1 = bottom)
           const relativeY = touchY - containerTop;
           const normalizedPosition = relativeY / containerHeight;
@@ -367,6 +350,9 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         }
       },
       onPanResponderRelease: () => {
+        // Capture current activation ID for callback validation
+        const releaseActivationId = activationIdRef.current;
+        
         // Clear long press timer if it hasn't fired yet
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
@@ -386,14 +372,27 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         
         // Panel was expanded, so collapse it
         isActiveRef.current = false;
-        if (intervalIdRef.current) {
-          clearInterval(intervalIdRef.current);
-          intervalIdRef.current = null;
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
         }
+        if (incrementTimeoutRef.current) {
+          clearTimeout(incrementTimeoutRef.current);
+          incrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        // Flush final value immediately
+        onValueChange(valueRef.current);
         
-        // Collapse
+        // Collapse - set state IMMEDIATELY, don't wait for animation
         isExpandedRef.current = false;
         hasExpandedRef.current = false;
+        setIsExpanded(false); // Hide rate display immediately
+        onExpandedChange?.(false); // Re-enable scrolling immediately
+        
         Animated.parallel([
           Animated.spring(expandAnim, {
             toValue: INITIAL_SIZE,
@@ -413,10 +412,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
             tension: 50,
             friction: 7,
           }),
-        ]).start(() => {
-          setIsExpanded(false);
-          onExpandedChange?.(false);
-        });
+        ]).start();
       },
       onPanResponderTerminate: () => {
         // Clear long press timer if it hasn't fired yet
@@ -437,13 +433,27 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         }
         
         isActiveRef.current = false;
-        if (intervalIdRef.current) {
-          clearInterval(intervalIdRef.current);
-          intervalIdRef.current = null;
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
         }
+        if (incrementTimeoutRef.current) {
+          clearTimeout(incrementTimeoutRef.current);
+          incrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        // Flush final value immediately
+        onValueChange(valueRef.current);
         
+        // Collapse - set state IMMEDIATELY, don't wait for animation
         isExpandedRef.current = false;
         hasExpandedRef.current = false;
+        setIsExpanded(false); // Hide rate display immediately
+        onExpandedChange?.(false); // Re-enable scrolling immediately
+        
         Animated.parallel([
           Animated.spring(expandAnim, {
             toValue: INITIAL_SIZE,
@@ -463,10 +473,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
             tension: 50,
             friction: 7,
           }),
-        ]).start(() => {
-          setIsExpanded(false);
-          onExpandedChange?.(false);
-        });
+        ]).start();
       },
     })
   ).current;
@@ -474,11 +481,17 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (incrementTimeoutRef.current) {
+        clearTimeout(incrementTimeoutRef.current);
       }
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
+      }
+      if (stateUpdateTimeoutRef.current) {
+        clearTimeout(stateUpdateTimeoutRef.current);
       }
     };
   }, []);
@@ -548,6 +561,8 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           )}
         </Animated.View>
       </View>
+
+      <Text style={styles.hintLabel}>Hold the + for rapid input, slide up/down to adjust rate</Text>
 
       {metric.max && (
         <Text style={styles.maxLabel}>Max: {metric.max}</Text>
@@ -669,5 +684,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#b0b0b0',
     marginTop: 4,
+  },
+  hintLabel: {
+    fontSize: 11,
+    color: '#888',
+    marginTop: 6,
+    fontStyle: 'italic',
   },
 });
