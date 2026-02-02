@@ -5,17 +5,15 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { format } from 'date-fns';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  AppState,
-  AppStateStatus,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 function formatTimestamp(ts: number) {
@@ -48,12 +46,8 @@ export function AdminPanel() {
     return Number.isFinite(num) ? num : null;
   }, [user?.teamNumber]);
 
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState !== 'active') lock();
-    });
-    return () => sub.remove();
-  }, [lock]);
+  // Removed AppState lock - admin session now persists across app backgrounding
+  // Session will still expire based on sessionTtlMs (15 minutes)
 
   useEffect(() => {
     if (!toast) return;

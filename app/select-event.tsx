@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 
-const CURRENT_YEAR = ACTIVE_GAME_CONFIG.year;
+const CURRENT_YEAR = 2025; //ACTIVE_GAME_CONFIG.year;
 
 const getLocationString = (event: any) => {
   const parts = [event.city, event.state_prov, event.country].filter(Boolean);

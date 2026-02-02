@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 type AdminState = {
@@ -20,10 +21,50 @@ type AdminState = {
   lock: () => void;
   recordFailure: (nowMs?: number) => { locked: boolean; lockUntilMs?: number };
   resetFailures: () => void;
+  initialize: () => Promise<void>; // Load persisted state
 };
+
+const ADMIN_UNLOCK_KEY = 'admin_unlocked_at_ms';
+const ADMIN_SESSION_TTL_KEY = 'admin_session_ttl_ms';
 
 function now() {
   return Date.now();
+}
+
+// Load persisted unlock state from AsyncStorage
+async function loadPersistedUnlock(sessionTtlMs: number = 15 * 60 * 1000): Promise<number | null> {
+  try {
+    const stored = await AsyncStorage.getItem(ADMIN_UNLOCK_KEY);
+    if (!stored) return null;
+    const unlockedAtMs = parseInt(stored, 10);
+    if (isNaN(unlockedAtMs)) return null;
+    
+    // Check if session is still valid
+    const nowMs = Date.now();
+    if (nowMs - unlockedAtMs > sessionTtlMs) {
+      // Session expired, clear it
+      await AsyncStorage.removeItem(ADMIN_UNLOCK_KEY);
+      return null;
+    }
+    
+    return unlockedAtMs;
+  } catch (error) {
+    console.error('Error loading persisted admin unlock:', error);
+    return null;
+  }
+}
+
+// Save unlock state to AsyncStorage
+async function savePersistedUnlock(unlockedAtMs: number | null) {
+  try {
+    if (unlockedAtMs === null) {
+      await AsyncStorage.removeItem(ADMIN_UNLOCK_KEY);
+    } else {
+      await AsyncStorage.setItem(ADMIN_UNLOCK_KEY, unlockedAtMs.toString());
+    }
+  } catch (error) {
+    console.error('Error saving persisted admin unlock:', error);
+  }
 }
 
 function computeLockMs(failedAttempts: number, baseLockMs: number) {
@@ -33,14 +74,14 @@ function computeLockMs(failedAttempts: number, baseLockMs: number) {
 }
 
 export const useAdminStore = create<AdminState>((set, get) => ({
-  unlockedAtMs: null,
-  failedAttempts: 0,
-  lockUntilMs: null,
-  lastFailureAtMs: null,
+    unlockedAtMs: null,
+    failedAttempts: 0,
+    lockUntilMs: null,
+    lastFailureAtMs: null,
 
-  sessionTtlMs: 15 * 60 * 1000,
-  maxAttemptsBeforeLock: 5,
-  baseLockMs: 60 * 1000,
+    sessionTtlMs: 15 * 60 * 1000,
+    maxAttemptsBeforeLock: 5,
+    baseLockMs: 60 * 1000,
 
   isUnlocked: (nowMs = now()) => {
     const { unlockedAtMs, sessionTtlMs } = get();
@@ -61,12 +102,16 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       lockUntilMs: null,
       lastFailureAtMs: null,
     });
+    // Persist unlock state
+    savePersistedUnlock(nowMs);
   },
 
   lock: () => {
     set({
       unlockedAtMs: null,
     });
+    // Clear persisted unlock state
+    savePersistedUnlock(null);
   },
 
   recordFailure: (nowMs = now()) => {
@@ -97,6 +142,14 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       lockUntilMs: null,
       lastFailureAtMs: null,
     });
+  },
+
+  initialize: async () => {
+    const { sessionTtlMs } = get();
+    const unlockedAtMs = await loadPersistedUnlock(sessionTtlMs);
+    if (unlockedAtMs !== null) {
+      set({ unlockedAtMs });
+    }
   },
 }));
 

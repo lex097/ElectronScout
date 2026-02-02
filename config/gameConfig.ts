@@ -153,13 +153,22 @@ export const GAME_2026: GameConfig = {
     {
       id: "auto",
       label: "Autonomous",
-      duration: 20,
+      duration: 23,
       metrics: [
         {
           id: "fuelAuto",
           type: "rapidCounter",
           label: "Fuel Scored",
           points: 1,
+          defaultValue: 0,
+          minRate: 2,
+          maxRate: 20
+        },
+        {
+          id: "passAuto",
+          type: "rapidCounter",
+          label: "Fuel Passed",
+          points: 0,
           defaultValue: 0,
           minRate: 2,
           maxRate: 20

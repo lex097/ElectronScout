@@ -3,7 +3,7 @@ import { adminService } from '@/services/adminService';
 import { useAdminStore } from '@/stores/adminStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, AppState, AppStateStatus, Keyboard, StyleSheet, Text, TouchableWithoutFeedback, View } from 'react-native';
+import { ActivityIndicator, Keyboard, StyleSheet, Text, TouchableWithoutFeedback, View } from 'react-native';
 
 function formatMsRemaining(ms: number) {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -16,7 +16,6 @@ function formatMsRemaining(ms: number) {
 export function AdminUnlockGate() {
   const user = useAuthStore((s) => s.user);
   const unlock = useAdminStore((s) => s.unlock);
-  const lock = useAdminStore((s) => s.lock);
   const canAttempt = useAdminStore((s) => s.canAttempt);
   const recordFailure = useAdminStore((s) => s.recordFailure);
 
@@ -29,12 +28,8 @@ export function AdminUnlockGate() {
     return Number.isFinite(num) ? num : null;
   }, [user?.teamNumber]);
 
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState !== 'active') lock();
-    });
-    return () => sub.remove();
-  }, [lock]);
+  // Removed AppState lock - admin session now persists across app backgrounding
+  // Session will still expire based on sessionTtlMs (15 minutes)
 
   // keep lock countdown UI fresh
   useEffect(() => {
