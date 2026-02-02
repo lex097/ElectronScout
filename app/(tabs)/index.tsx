@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Dimensions, NativeScrollEvent, NativeSyntheticEvent, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
@@ -36,6 +36,12 @@ export default function MatchScoutScreen() {
   const [isRapidCounterExpanded, setIsRapidCounterExpanded] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollYRef = useRef<number>(0); // Track current scroll position
+  const notesInputRef = useRef<TextInput>(null);
+  const notesSectionRef = useRef<View>(null);
+  const notesSectionYRef = useRef<number>(0);
+  const saveButtonContainerRef = useRef<View>(null);
+  const saveButtonYRef = useRef<number>(0);
+  const isShiftPressedRef = useRef<boolean>(false);
   const insets = useSafeAreaInsets();
   const getScoutName = useAuthStore((state) => state.getScoutName);
 
@@ -201,10 +207,15 @@ export default function MatchScoutScreen() {
                     ]}
                     onPress={() => updateMetric(metric.id, option)}
                   >
-                    <Text style={[
-                      styles.selectOptionButtonText,
-                      value === option && styles.selectOptionButtonTextActive
-                    ]}>
+                    <Text 
+                      style={[
+                        styles.selectOptionButtonText,
+                        value === option && styles.selectOptionButtonTextActive
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit={true}
+                      minimumFontScale={0.7}
+                    >
                       {option}
                     </Text>
                   </TouchableOpacity>
@@ -253,7 +264,86 @@ export default function MatchScoutScreen() {
     }
   }, [insets.bottom, insets.top]);
 
+  const handleNotesFocus = useCallback(() => {
+    // Wait a bit for the keyboard to start appearing, then scroll so save button is right above keyboard
+    setTimeout(() => {
+      if (scrollViewRef.current) {
+        const screenHeight = Dimensions.get('window').height;
+        const tabBarHeight = 49 + insets.bottom;
+        // Estimate keyboard height (will be adjusted by KeyboardAvoidingView)
+        const keyboardHeight = Platform.OS === 'ios' ? 336 : 300;
+        const visibleAreaBottom = screenHeight - tabBarHeight - keyboardHeight;
+        
+        // Get the stored Y positions
+        const saveButtonY = saveButtonYRef.current;
+        const saveButtonHeight = 60; // Approximate height of save button (padding 20 + text)
+        
+        // We want to scroll so that:
+        // - Save button is positioned right above the keyboard (at the bottom of visible area)
+        // - Notes input is visible above the save button
+        // - Keyboard appears right below the save button
+        
+        // Position save button bottom at the visible area bottom (right above keyboard)
+        const saveButtonBottom = saveButtonY + saveButtonHeight;
+        const scrollToY = saveButtonBottom - visibleAreaBottom;
+        
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, scrollToY),
+          animated: true,
+        });
+      }
+    }, 150);
+  }, [insets.bottom]);
+
+  const handleNotesSectionLayout = useCallback((event: any) => {
+    const { y } = event.nativeEvent.layout;
+    notesSectionYRef.current = y;
+  }, []);
+
+  const handleSaveButtonLayout = useCallback((event: any) => {
+    const { y } = event.nativeEvent.layout;
+    saveButtonYRef.current = y;
+  }, []);
+
+  const handleScrollBeginDrag = useCallback(() => {
+    // Dismiss keyboard when user starts scrolling
+    Keyboard.dismiss();
+  }, []);
+
+  const handleNotesKeyPress = useCallback((event: any) => {
+    const key = event.nativeEvent?.key;
+    
+    // Check if Return/Enter is pressed
+    if (key === 'Enter' || key === 'Return') {
+      // Try to detect if Shift is pressed
+      // Check various possible locations for shift key state
+      const nativeEvent = event.nativeEvent || {};
+      const isShiftPressed = 
+        nativeEvent.shiftKey === true || 
+        nativeEvent.modifiers?.shift === true ||
+        nativeEvent.modifiers?.includes?.('shift') ||
+        isShiftPressedRef.current;
+      
+      // Only dismiss if Shift is NOT pressed
+      if (!isShiftPressed) {
+        Keyboard.dismiss();
+        notesInputRef.current?.blur();
+      }
+      // If Shift is pressed, allow default behavior (new line) - don't dismiss
+    } else if (key === 'Shift' || key === 'ShiftLeft' || key === 'ShiftRight') {
+      // Track shift key state when it's pressed
+      isShiftPressedRef.current = true;
+      // Reset after a short delay (in case keyup event doesn't fire)
+      setTimeout(() => {
+        isShiftPressedRef.current = false;
+      }, 1000);
+    }
+  }, []);
+
   const handleSave = async () => {
+    // Dismiss keyboard when saving
+    Keyboard.dismiss();
+    
     if (!teamNumber || !matchNumber) {
       Alert.alert('Error', 'Please enter match and team number');
       return;
@@ -318,18 +408,26 @@ export default function MatchScoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <ScrollView 
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        contentContainerStyle={styles.content}
-        scrollEnabled={!isRapidCounterExpanded}
-        nestedScrollEnabled={!isRapidCounterExpanded}
-        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
-          // Track current scroll position for auto-scroll calculations
-          scrollYRef.current = event.nativeEvent.contentOffset.y;
-        }}
-        scrollEventThrottle={16}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.content}
+          scrollEnabled={!isRapidCounterExpanded}
+          nestedScrollEnabled={!isRapidCounterExpanded}
+          onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            // Track current scroll position for auto-scroll calculations
+            scrollYRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          onScrollBeginDrag={handleScrollBeginDrag}
+        >
         {/* Match Info */}
         {isTBAMode ? (
           <View style={styles.tbaInfoContainer}>
@@ -341,7 +439,14 @@ export default function MatchScoutScreen() {
                   style={styles.changeButton}
                   onPress={handleSelectEvent}
                 >
-                  <Text style={styles.changeButtonText}>Change Event</Text>
+                  <Text 
+                    style={styles.changeButtonText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.7}
+                  >
+                    Change Event
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -351,7 +456,14 @@ export default function MatchScoutScreen() {
                   style={styles.selectButton}
                   onPress={handleSelectEvent}
                 >
-                  <Text style={styles.selectButtonText}>Select Event</Text>
+                  <Text 
+                    style={styles.selectButtonText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.7}
+                  >
+                    Select Event
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -371,7 +483,14 @@ export default function MatchScoutScreen() {
                   }
                 }}
               >
-                <Text style={styles.selectMatchButtonText}>Choose Match and Team</Text>
+                <Text 
+                  style={styles.selectMatchButtonText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                  minimumFontScale={0.7}
+                >
+                  Choose Match and Team
+                </Text>
               </TouchableOpacity>
             )}
 
@@ -435,10 +554,15 @@ export default function MatchScoutScreen() {
               ]}
               onPress={() => setCurrentPhaseIndex(index)}
             >
-              <Text style={[
-                styles.phaseTabText,
-                currentPhaseIndex === index && styles.phaseTabTextActive
-              ]}>
+              <Text 
+                style={[
+                  styles.phaseTabText,
+                  currentPhaseIndex === index && styles.phaseTabTextActive
+                ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit={true}
+                minimumFontScale={0.7}
+              >
                 {phase.label}
               </Text>
             </TouchableOpacity>
@@ -451,30 +575,42 @@ export default function MatchScoutScreen() {
           {currentPhase.metrics.map(metric => renderMetricInput(metric))}
         </View>
 
-        {/* Notes */}
-        <View style={styles.notesSection}>
-          <Text style={styles.inputLabel}>Notes (Optional)</Text>
-          <TextInput
-            style={styles.notesInput}
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Additional observations..."
-            multiline
-            numberOfLines={3}
-          />
-        </View>
+        {/* Notes - Only show in Endgame phase */}
+        {currentPhase.id === 'endgame' && (
+          <View 
+            ref={notesSectionRef} 
+            style={styles.notesSection}
+            onLayout={handleNotesSectionLayout}
+          >
+            <Text style={styles.inputLabel}>Notes (Optional)</Text>
+            <TextInput
+              ref={notesInputRef}
+              style={styles.notesInput}
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Additional observations..."
+              multiline
+              numberOfLines={3}
+              onFocus={handleNotesFocus}
+              onKeyPress={handleNotesKeyPress}
+            />
+          </View>
+        )}
 
         {/* Save Button */}
-        <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          <Text style={styles.saveButtonText}>
-            {isSaving ? 'Saving...' : 'Save Match'}
-          </Text>
-        </TouchableOpacity>
+        <View ref={saveButtonContainerRef} onLayout={handleSaveButtonLayout}>
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            <Text style={styles.saveButtonText}>
+              {isSaving ? 'Saving...' : 'Save Match'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -483,6 +619,9 @@ const styles = {
   container: {
     flex: 1,
     backgroundColor: '#1a1a1a',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   header: {
     backgroundColor: '#ff6600',
@@ -499,7 +638,7 @@ const styles = {
   },
   content: {
     padding: 16,
-    paddingBottom: 0,
+    paddingBottom: 16,
   },
   matchInfo: {
     flexDirection: 'row' as const,
@@ -547,6 +686,7 @@ const styles = {
     fontSize: 14,
     fontWeight: '600' as const,
     color: '#b0b0b0',
+    textAlign: 'center' as const,
   },
   phaseTabTextActive: {
     color: 'white',
@@ -646,6 +786,7 @@ const styles = {
     fontSize: 16,
     fontWeight: '600' as const,
     color: '#ff9940',
+    textAlign: 'center' as const,
   },
   selectOptionButtonTextActive: {
     color: 'white',
@@ -734,6 +875,7 @@ const styles = {
     fontSize: 14,
     fontWeight: '600' as const,
     color: '#ff6600',
+    textAlign: 'center' as const,
   },
   selectButton: {
     backgroundColor: '#ff6600',
@@ -746,6 +888,7 @@ const styles = {
     fontSize: 16,
     fontWeight: '600' as const,
     color: 'white',
+    textAlign: 'center' as const,
   },
   selectMatchButton: {
     backgroundColor: '#3a3a3a',
@@ -759,5 +902,6 @@ const styles = {
     fontSize: 14,
     fontWeight: '600' as const,
     color: '#ff6600',
+    textAlign: 'center' as const,
   },
 };

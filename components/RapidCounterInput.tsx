@@ -29,13 +29,21 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   const maxRate = metric.maxRate ?? DEFAULT_MAX_RATE;
   
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isDecrementExpanded, setIsDecrementExpanded] = useState(false);
   const [displayRate, setDisplayRate] = useState((minRate + maxRate) / 2);
+  const [displayDecrementRate, setDisplayDecrementRate] = useState((minRate + maxRate) / 2);
   
-  // Animated values for UI
+  // Animated values for UI (increment)
   const expandAnim = useRef(new Animated.Value(INITIAL_SIZE)).current;
   const widthAnim = useRef(new Animated.Value(INITIAL_SIZE)).current;
   const borderRadiusAnim = useRef(new Animated.Value(INITIAL_SIZE / 2)).current;
   const indicatorPositionAnim = useRef(new Animated.Value(0.5)).current;
+  
+  // Animated values for UI (decrement)
+  const decrementExpandAnim = useRef(new Animated.Value(INITIAL_SIZE)).current;
+  const decrementWidthAnim = useRef(new Animated.Value(INITIAL_SIZE)).current;
+  const decrementBorderRadiusAnim = useRef(new Animated.Value(INITIAL_SIZE / 2)).current;
+  const decrementIndicatorPositionAnim = useRef(new Animated.Value(0.5)).current;
   
   // All mutable state in refs to avoid closure issues
   const valueRef = useRef(value);
@@ -49,6 +57,22 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasExpandedRef = useRef(false);
   const activationIdRef = useRef(0); // Unique ID for each activation to prevent stale callbacks
+  
+  // Decrement press-and-hold state
+  const isDecrementActiveRef = useRef(false);
+  const decrementTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const decrementIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastDecrementTimeRef = useRef(0);
+  const decrementAnimationFrameRef = useRef<number | null>(null);
+  const decrementLongPressStartedRef = useRef(false);
+  const decrementContainerRef = useRef<View>(null);
+  const decrementContainerLayout = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const decrementStartYRef = useRef(0);
+  const decrementLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const decrementHasExpandedRef = useRef(false);
+  const decrementIsExpandedRef = useRef(false);
+  const decrementActivationIdRef = useRef(0);
+  const decrementCurrentRateRef = useRef((minRate + maxRate) / 2);
   
   // Keep valueRef in sync with prop
   useEffect(() => {
@@ -153,6 +177,70 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
     onValueChange(valueRef.current);
   }, [onValueChange]);
 
+  // Decrement loop - similar to increment but for decreasing value
+  const runDecrementLoop = useCallback((activationId: number) => {
+    if (!isDecrementActiveRef.current || activationId !== decrementActivationIdRef.current) {
+      return;
+    }
+    
+    const now = performance.now();
+    const rate = decrementCurrentRateRef.current;
+    const intervalMs = 1000 / rate;
+    
+    // Check if enough time has passed for a decrement
+    if (now - lastDecrementTimeRef.current >= intervalMs) {
+      const currentValue = valueRef.current;
+      const newValue = currentValue - 1;
+      
+      // Don't decrement below 0
+      if (newValue >= 0) {
+        // Fire haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        
+        // Update internal ref
+        valueRef.current = newValue;
+        lastDecrementTimeRef.current = now;
+        
+        // Throttle React state updates
+        flushValueToState();
+      } else {
+        // Hit minimum (0), stop
+        isDecrementActiveRef.current = false;
+        onValueChange(valueRef.current);
+        return;
+      }
+    }
+    
+    // Schedule next frame
+    decrementAnimationFrameRef.current = requestAnimationFrame(() => runDecrementLoop(activationId));
+  }, [onValueChange, flushValueToState]);
+
+  // Start the decrement loop
+  const startDecrementLoop = useCallback((activationId: number) => {
+    lastDecrementTimeRef.current = performance.now();
+    isDecrementActiveRef.current = true;
+    runDecrementLoop(activationId);
+  }, [runDecrementLoop]);
+
+  // Stop the decrement loop and flush final value
+  const stopDecrementLoop = useCallback(() => {
+    isDecrementActiveRef.current = false;
+    if (decrementAnimationFrameRef.current) {
+      cancelAnimationFrame(decrementAnimationFrameRef.current);
+      decrementAnimationFrameRef.current = null;
+    }
+    if (decrementTimeoutRef.current) {
+      clearTimeout(decrementTimeoutRef.current);
+      decrementTimeoutRef.current = null;
+    }
+    if (decrementIntervalRef.current) {
+      clearInterval(decrementIntervalRef.current);
+      decrementIntervalRef.current = null;
+    }
+    // Flush final value immediately
+    onValueChange(valueRef.current);
+  }, [onValueChange]);
+
   // Create pan responder
   const panResponder = useRef(
     PanResponder.create({
@@ -185,6 +273,22 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         widthAnim.setValue(INITIAL_SIZE);
         borderRadiusAnim.setValue(INITIAL_SIZE / 2);
         setIsExpanded(false);
+        
+        // Collapse decrement button if it's expanded
+        if (decrementIsExpandedRef.current) {
+          isDecrementActiveRef.current = false;
+          if (decrementAnimationFrameRef.current) {
+            cancelAnimationFrame(decrementAnimationFrameRef.current);
+            decrementAnimationFrameRef.current = null;
+          }
+          decrementExpandAnim.setValue(INITIAL_SIZE);
+          decrementWidthAnim.setValue(INITIAL_SIZE);
+          decrementBorderRadiusAnim.setValue(INITIAL_SIZE / 2);
+          setIsDecrementExpanded(false);
+          decrementIsExpandedRef.current = false;
+          decrementHasExpandedRef.current = false;
+        }
+        
         onExpandedChange?.(false); // Notify parent to re-enable scrolling
         
         // Clear any running loops/timeouts from previous activation
@@ -391,7 +495,11 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         isExpandedRef.current = false;
         hasExpandedRef.current = false;
         setIsExpanded(false); // Hide rate display immediately
-        onExpandedChange?.(false); // Re-enable scrolling immediately
+        
+        // Only notify parent if both are collapsed
+        if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
+          onExpandedChange?.(false); // Re-enable scrolling immediately
+        }
         
         Animated.parallel([
           Animated.spring(expandAnim, {
@@ -452,7 +560,11 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         isExpandedRef.current = false;
         hasExpandedRef.current = false;
         setIsExpanded(false); // Hide rate display immediately
-        onExpandedChange?.(false); // Re-enable scrolling immediately
+        
+        // Only notify parent if both are collapsed
+        if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
+          onExpandedChange?.(false); // Re-enable scrolling immediately
+        }
         
         Animated.parallel([
           Animated.spring(expandAnim, {
@@ -478,6 +590,330 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
     })
   ).current;
 
+  // Create pan responder for decrement button
+  const decrementPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: (evt, gestureState) => {
+        // Increment activation ID
+        decrementActivationIdRef.current += 1;
+        const currentActivationId = decrementActivationIdRef.current;
+        
+        decrementHasExpandedRef.current = false;
+        
+        // Clear any pending long press timer
+        if (decrementLongPressTimerRef.current) {
+          clearTimeout(decrementLongPressTimerRef.current);
+          decrementLongPressTimerRef.current = null;
+        }
+        
+        // Stop any running animations
+        decrementExpandAnim.stopAnimation();
+        decrementWidthAnim.stopAnimation();
+        decrementBorderRadiusAnim.stopAnimation();
+        
+        // Reset to collapsed state
+        decrementExpandAnim.setValue(INITIAL_SIZE);
+        decrementWidthAnim.setValue(INITIAL_SIZE);
+        decrementBorderRadiusAnim.setValue(INITIAL_SIZE / 2);
+        setIsDecrementExpanded(false);
+        
+        // Collapse increment button if it's expanded
+        if (isExpandedRef.current) {
+          isActiveRef.current = false;
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+          }
+          expandAnim.setValue(INITIAL_SIZE);
+          widthAnim.setValue(INITIAL_SIZE);
+          borderRadiusAnim.setValue(INITIAL_SIZE / 2);
+          setIsExpanded(false);
+          isExpandedRef.current = false;
+          hasExpandedRef.current = false;
+        }
+        
+        // Only notify parent if both are collapsed
+        if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
+          onExpandedChange?.(false);
+        }
+        
+        // Clear any running loops/timeouts
+        if (decrementAnimationFrameRef.current) {
+          cancelAnimationFrame(decrementAnimationFrameRef.current);
+          decrementAnimationFrameRef.current = null;
+        }
+        if (decrementTimeoutRef.current) {
+          clearTimeout(decrementTimeoutRef.current);
+          decrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        isDecrementActiveRef.current = false;
+        
+        // Measure container position
+        decrementContainerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+          decrementContainerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          decrementStartYRef.current = evt.nativeEvent.pageY;
+        });
+        
+        // Start long press timer (0.15 seconds)
+        decrementLongPressTimerRef.current = setTimeout(() => {
+          if (currentActivationId !== decrementActivationIdRef.current) {
+            return;
+          }
+          // Long press detected - expand panel
+          decrementHasExpandedRef.current = true;
+          
+          // Initial haptic feedback
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          
+          // Set default initial rate
+          const defaultRate = (minRate + maxRate) / 2;
+          decrementCurrentRateRef.current = defaultRate;
+          setDisplayDecrementRate(defaultRate);
+          decrementIndicatorPositionAnim.setValue(0.5);
+          
+          // Measure container position
+          decrementContainerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+            if (typeof pageY === 'number' && typeof pageX === 'number' && !isNaN(pageY) && !isNaN(pageX)) {
+              decrementContainerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+              
+              // Calculate initial indicator position
+              const fingerY = decrementStartYRef.current;
+              const relativeY = fingerY - pageY;
+              const normalizedPosition = relativeY / EXPANDED_HEIGHT;
+              const clampedPosition = Math.max(0, Math.min(1, 1 - normalizedPosition));
+              
+              // Set initial rate and indicator
+              const initialRate = minRate + (maxRate - minRate) * clampedPosition;
+              decrementCurrentRateRef.current = initialRate;
+              setDisplayDecrementRate(initialRate);
+              decrementIndicatorPositionAnim.setValue(clampedPosition);
+              
+              // Notify parent to scroll
+              if (onExpand) {
+                onExpand(pageY, EXPANDED_HEIGHT);
+              }
+            }
+          });
+          
+          // Expand
+          setIsDecrementExpanded(true);
+          decrementIsExpandedRef.current = true;
+          onExpandedChange?.(true);
+          Animated.parallel([
+            Animated.spring(decrementExpandAnim, {
+              toValue: EXPANDED_HEIGHT,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+            Animated.spring(decrementWidthAnim, {
+              toValue: EXPANDED_WIDTH,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+            Animated.spring(decrementBorderRadiusAnim, {
+              toValue: EXPANDED_WIDTH / 2,
+              useNativeDriver: false,
+              tension: 50,
+              friction: 7,
+            }),
+          ]).start(() => {
+            if (currentActivationId !== decrementActivationIdRef.current) {
+              return;
+            }
+            // Re-measure after expansion
+            decrementContainerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+              decrementContainerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+            });
+          });
+          
+          // Start decrementing
+          isDecrementActiveRef.current = true;
+          if (decrementTimeoutRef.current) {
+            clearTimeout(decrementTimeoutRef.current);
+          }
+          startDecrementLoop(currentActivationId);
+        }, 150);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        if (!decrementHasExpandedRef.current) {
+          return;
+        }
+        
+        // Re-measure container position
+        decrementContainerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+          if (typeof pageY === 'number' && !isNaN(pageY) && typeof pageX === 'number' && !isNaN(pageX)) {
+            decrementContainerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          }
+        });
+        
+        // Use absolute touch position relative to container
+        const touchY = evt.nativeEvent.pageY;
+        const containerTop = decrementContainerLayout.current.y;
+        const containerHeight = EXPANDED_HEIGHT;
+        
+        if (typeof containerTop === 'number' && !isNaN(containerTop) && containerHeight > 0) {
+          const relativeY = touchY - containerTop;
+          const normalizedPosition = relativeY / containerHeight;
+          
+          // Invert: 0 = bottom (min rate), 1 = top (max rate)
+          const position = 1 - normalizedPosition;
+          const clampedPosition = Math.max(0, Math.min(1, position));
+          
+          const newRate = minRate + (maxRate - minRate) * clampedPosition;
+          decrementCurrentRateRef.current = newRate;
+          setDisplayDecrementRate(newRate);
+          decrementIndicatorPositionAnim.setValue(clampedPosition);
+        } else {
+          // Fallback
+          const dy = gestureState.dy;
+          const position = 0.5 - (dy / EXPANDED_HEIGHT);
+          const clampedPosition = Math.max(0, Math.min(1, position));
+          
+          const newRate = minRate + (maxRate - minRate) * clampedPosition;
+          decrementCurrentRateRef.current = newRate;
+          setDisplayDecrementRate(newRate);
+          decrementIndicatorPositionAnim.setValue(clampedPosition);
+        }
+      },
+      onPanResponderRelease: () => {
+        const releaseActivationId = decrementActivationIdRef.current;
+        
+        // Clear long press timer
+        if (decrementLongPressTimerRef.current) {
+          clearTimeout(decrementLongPressTimerRef.current);
+          decrementLongPressTimerRef.current = null;
+        }
+        
+        // If panel didn't expand (quick press), just decrement by 1
+        if (!decrementHasExpandedRef.current) {
+          const currentValue = valueRef.current;
+          const newValue = currentValue - 1;
+          if (newValue >= 0) {
+            onValueChange(newValue);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
+          return;
+        }
+        
+        // Panel was expanded, so collapse it
+        isDecrementActiveRef.current = false;
+        if (decrementAnimationFrameRef.current) {
+          cancelAnimationFrame(decrementAnimationFrameRef.current);
+          decrementAnimationFrameRef.current = null;
+        }
+        if (decrementTimeoutRef.current) {
+          clearTimeout(decrementTimeoutRef.current);
+          decrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        onValueChange(valueRef.current);
+        
+        // Collapse
+        decrementIsExpandedRef.current = false;
+        decrementHasExpandedRef.current = false;
+        setIsDecrementExpanded(false);
+        
+        // Only notify parent if both are collapsed
+        if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
+          onExpandedChange?.(false);
+        }
+        
+        Animated.parallel([
+          Animated.spring(decrementExpandAnim, {
+            toValue: INITIAL_SIZE,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.spring(decrementWidthAnim, {
+            toValue: INITIAL_SIZE,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.spring(decrementBorderRadiusAnim, {
+            toValue: INITIAL_SIZE / 2,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+        ]).start();
+      },
+      onPanResponderTerminate: () => {
+        if (decrementLongPressTimerRef.current) {
+          clearTimeout(decrementLongPressTimerRef.current);
+          decrementLongPressTimerRef.current = null;
+        }
+        
+        if (!decrementHasExpandedRef.current) {
+          const currentValue = valueRef.current;
+          const newValue = currentValue - 1;
+          if (newValue >= 0) {
+            onValueChange(newValue);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          }
+          return;
+        }
+        
+        isDecrementActiveRef.current = false;
+        if (decrementAnimationFrameRef.current) {
+          cancelAnimationFrame(decrementAnimationFrameRef.current);
+          decrementAnimationFrameRef.current = null;
+        }
+        if (decrementTimeoutRef.current) {
+          clearTimeout(decrementTimeoutRef.current);
+          decrementTimeoutRef.current = null;
+        }
+        if (stateUpdateTimeoutRef.current) {
+          clearTimeout(stateUpdateTimeoutRef.current);
+          stateUpdateTimeoutRef.current = null;
+        }
+        onValueChange(valueRef.current);
+        
+        decrementIsExpandedRef.current = false;
+        decrementHasExpandedRef.current = false;
+        setIsDecrementExpanded(false);
+        onExpandedChange?.(false);
+        
+        Animated.parallel([
+          Animated.spring(decrementExpandAnim, {
+            toValue: INITIAL_SIZE,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.spring(decrementWidthAnim, {
+            toValue: INITIAL_SIZE,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.spring(decrementBorderRadiusAnim, {
+            toValue: INITIAL_SIZE / 2,
+            useNativeDriver: false,
+            tension: 50,
+            friction: 7,
+          }),
+        ]).start();
+      },
+    })
+  ).current;
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -493,11 +929,29 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
       if (stateUpdateTimeoutRef.current) {
         clearTimeout(stateUpdateTimeoutRef.current);
       }
+      if (decrementAnimationFrameRef.current) {
+        cancelAnimationFrame(decrementAnimationFrameRef.current);
+      }
+      if (decrementTimeoutRef.current) {
+        clearTimeout(decrementTimeoutRef.current);
+      }
+      if (decrementIntervalRef.current) {
+        clearInterval(decrementIntervalRef.current);
+      }
+      if (decrementLongPressTimerRef.current) {
+        clearTimeout(decrementLongPressTimerRef.current);
+      }
     };
   }, []);
 
   // Indicator position interpolation (0 = bottom, 1 = top)
   const indicatorTop = indicatorPositionAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [EXPANDED_HEIGHT - 30, 30],
+  });
+
+  // Decrement indicator position interpolation (0 = bottom, 1 = top)
+  const decrementIndicatorTop = decrementIndicatorPositionAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [EXPANDED_HEIGHT - 30, 30],
   });
@@ -508,12 +962,45 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
       
       <View style={styles.counterRow}>
         {/* Decrement button */}
-        <TouchableOpacity
-          style={styles.counterButton}
-          onPress={() => onValueChange(Math.max(0, value - 1))}
+        <Animated.View
+          ref={decrementContainerRef}
+          style={[
+            styles.rapidCounterContainer,
+            {
+              height: decrementExpandAnim,
+              width: decrementWidthAnim,
+              borderRadius: decrementBorderRadiusAnim,
+            },
+          ]}
+          {...decrementPanResponder.panHandlers}
         >
-          <Text style={styles.counterButtonText}>-</Text>
-        </TouchableOpacity>
+          {isDecrementExpanded ? (
+            <View style={styles.expandedContent}>
+              {/* Rate indicator dot */}
+              <Animated.View
+                style={[
+                  styles.rateIndicator,
+                  { top: decrementIndicatorTop },
+                ]}
+              />
+              
+              {/* Rate display */}
+              <View style={styles.rateDisplay}>
+                <Text style={styles.rateText}>{displayDecrementRate.toFixed(1)}/s</Text>
+              </View>
+              
+              {/* Labels */}
+              <View style={styles.rateLabels}>
+                <Text style={styles.rateLabelText}>Fast</Text>
+                <Text style={styles.rateLabelText}>Slow</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.collapsedContent}>
+              <Text style={styles.plusText}>-</Text>
+            </View>
+          )}
+        </Animated.View>
 
         {/* Value display */}
         <View style={styles.valueContainer}>
