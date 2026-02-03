@@ -58,6 +58,8 @@ export interface MatchOdds {
   expectedTotal: number;
   matchConfidence: number;
   leagueAverage?: LeagueAverage;
+  redAverage: number;
+  blueAverage: number;
 }
 
 class BettingService {
@@ -248,16 +250,36 @@ class BettingService {
   calculateMarginOdds(
     expectedMargin: number,
     marginThreshold: number,
+    alliance: 'red' | 'blue',
+    redAvg: number,
+    blueAvg: number,
     matchConf: number
   ): number {
     let dataProb = 0.5;
 
+    // Determine if the selected alliance is expected to win
+    const redWins = redAvg > blueAvg;
+    const selectedAllianceWins = alliance === 'red' ? redWins : !redWins;
+    
+    // Calculate probability based on margin
     if (expectedMargin >= marginThreshold) {
-      // More likely to win if expected margin is well above threshold
-      dataProb = 0.5 + Math.min(0.3, (expectedMargin - marginThreshold) / 20);
+      // Expected margin is above threshold
+      if (selectedAllianceWins) {
+        // Selected alliance is expected to win by this margin → higher probability
+        dataProb = 0.5 + Math.min(0.3, (expectedMargin - marginThreshold) / 20);
+      } else {
+        // Selected alliance is NOT expected to win → lower probability (better odds)
+        dataProb = 0.5 - Math.min(0.3, (expectedMargin - marginThreshold) / 20);
+      }
     } else {
-      // Less likely to win if expected margin is below threshold
-      dataProb = 0.5 - Math.min(0.3, (marginThreshold - expectedMargin) / 20);
+      // Expected margin is below threshold
+      if (selectedAllianceWins) {
+        // Selected alliance wins but by less than threshold → lower probability
+        dataProb = 0.5 - Math.min(0.3, (marginThreshold - expectedMargin) / 20);
+      } else {
+        // Selected alliance doesn't win → much lower probability (better odds)
+        dataProb = 0.5 - Math.min(0.4, (marginThreshold - expectedMargin) / 15);
+      }
     }
 
     // Clamp to [0.2, 0.8]
@@ -277,21 +299,50 @@ class BettingService {
 
   /**
    * Calculate over/under odds
+   * @param expectedTotal - Expected combined score for the match
+   * @param threshold - The threshold to bet over/under
+   * @param overUnder - 'over' or 'under' direction of the bet
+   * @param matchConf - Match confidence (0-1)
+   * @param leagueAvg - Optional league average data
    */
   calculateOverUnderOdds(
     expectedTotal: number,
     threshold: number,
+    overUnder: 'over' | 'under',
     matchConf: number,
     leagueAvg?: LeagueAverage
   ): number {
     let dataProb = 0.5;
 
     if (expectedTotal > 0) {
-      if (expectedTotal > threshold) {
-        dataProb = 0.5 + Math.min(0.3, (expectedTotal - threshold) / 30);
+      // Calculate base probability based on how far expectedTotal is from threshold
+      const difference = expectedTotal - threshold;
+      const normalizedDiff = Math.min(30, Math.abs(difference)); // Cap at 30 points
+      
+      if (overUnder === 'over') {
+        // Betting "over": 
+        // - If expectedTotal > threshold: "over" is more likely → higher probability → lower odds
+        // - If expectedTotal < threshold: "over" is less likely → lower probability → higher odds
+        if (expectedTotal > threshold) {
+          // Expected is above threshold, so "over" is more likely → higher probability (lower odds)
+          dataProb = 0.5 + Math.min(0.3, normalizedDiff / 30);
+        } else {
+          // Expected is below threshold, so "over" is less likely → lower probability (higher odds)
+          dataProb = 0.5 - Math.min(0.3, normalizedDiff / 30);
+        }
       } else {
-        dataProb = 0.5 - Math.min(0.3, (threshold - expectedTotal) / 30);
+        // Betting "under":
+        // - If expectedTotal > threshold: "under" is less likely → lower probability → higher odds
+        // - If expectedTotal < threshold: "under" is more likely → higher probability → lower odds
+        if (expectedTotal > threshold) {
+          // Expected is above threshold, so "under" is less likely → lower probability (higher odds)
+          dataProb = 0.5 - Math.min(0.3, normalizedDiff / 30);
+        } else {
+          // Expected is below threshold, so "under" is more likely → higher probability (lower odds)
+          dataProb = 0.5 + Math.min(0.3, normalizedDiff / 30);
+        }
       }
+      
       dataProb = Math.max(0.2, Math.min(0.8, dataProb));
     }
 
@@ -331,9 +382,38 @@ class BettingService {
       matchConf
     );
 
-    // Calculate expected margin and total
-    const expectedMargin = Math.abs(redAlliance.average - blueAlliance.average);
-    const expectedTotal = redAlliance.average + blueAlliance.average;
+    // Calculate expected margin and total SEPARATELY
+    // Expected margin = absolute difference between alliance averages (spread)
+    const redAvg = redAlliance.average;
+    const blueAvg = blueAlliance.average;
+    const expectedMargin = Math.abs(redAvg - blueAvg);
+    
+    // Expected total = sum of alliance averages (combined score)
+    const expectedTotal = redAvg + blueAvg;
+
+    // Validation: These should NEVER be the same unless one alliance is 0
+    if (expectedMargin === expectedTotal && expectedTotal > 0) {
+      console.warn('⚠️ Expected margin equals expected total!', {
+        redAvg,
+        blueAvg,
+        expectedMargin,
+        expectedTotal,
+        redTeams,
+        blueTeams,
+      });
+    }
+
+    // Log for debugging
+    console.log('📊 Match Odds Calculation:', {
+      redAvg: redAvg.toFixed(2),
+      blueAvg: blueAvg.toFixed(2),
+      expectedMargin: expectedMargin.toFixed(2),
+      expectedTotal: expectedTotal.toFixed(2),
+      calculation: {
+        margin: `|${redAvg.toFixed(2)} - ${blueAvg.toFixed(2)}| = ${expectedMargin.toFixed(2)}`,
+        total: `${redAvg.toFixed(2)} + ${blueAvg.toFixed(2)} = ${expectedTotal.toFixed(2)}`,
+      },
+    });
 
     // Get league average if threshold is met
     const leagueAverage = await this.getLeagueAverage(eventKey);
@@ -347,6 +427,8 @@ class BettingService {
       expectedTotal,
       matchConfidence: matchConf,
       leagueAverage: leagueAverage || undefined,
+      redAverage: redAvg,
+      blueAverage: blueAvg,
     };
   }
 
@@ -653,21 +735,31 @@ class BettingService {
 
           case 'margin':
             const betMargin = bet.bet_details?.margin;
+            const marginBetAlliance = bet.bet_details?.alliance;
             if (betMargin !== undefined) {
+              const actualWinner = redScore > blueScore ? 'red' : 'blue';
               const marginDifference = margin - betMargin;
-              if (margin >= betMargin) {
+              
+              // Check if the correct alliance won AND margin is met
+              if (marginBetAlliance === actualWinner && margin >= betMargin) {
                 won = true;
                 payout = Math.round(bet.bet_amount * parseFloat(bet.odds));
                 console.log(`[Betting] Margin bet WON - Bet ID: ${bet.id}`);
+                console.log(`  Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}`);
                 console.log(`  Actual margin: ${margin} points (Red: ${redScore}, Blue: ${blueScore})`);
                 console.log(`  Bet threshold: ${betMargin} points`);
                 console.log(`  Won by: ${marginDifference.toFixed(1)} points`);
                 console.log(`  Payout: ${payout} ebucks (${bet.bet_amount} × ${bet.odds})`);
               } else {
                 console.log(`[Betting] Margin bet LOST - Bet ID: ${bet.id}`);
+                console.log(`  Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}`);
                 console.log(`  Actual margin: ${margin} points (Red: ${redScore}, Blue: ${blueScore})`);
                 console.log(`  Bet threshold: ${betMargin} points`);
-                console.log(`  Missed by: ${Math.abs(marginDifference).toFixed(1)} points`);
+                if (marginBetAlliance !== actualWinner) {
+                  console.log(`  Lost: Wrong alliance won`);
+                } else {
+                  console.log(`  Missed by: ${Math.abs(marginDifference).toFixed(1)} points`);
+                }
               }
             }
             break;
@@ -741,9 +833,13 @@ class BettingService {
                 console.log(`  Winner bet: ${betWon ? 'WON' : 'LOST'} - Bet on ${alliance}, actual winner: ${winningAlliance}`);
               } else if (parlayBet.type === 'margin') {
                 const marginThreshold = parlayBet.details?.margin;
-                betWon = marginThreshold !== undefined && margin >= marginThreshold;
+                const marginBetAlliance = parlayBet.details?.alliance;
+                const actualWinner = redScore > blueScore ? 'red' : 'blue';
+                betWon = marginThreshold !== undefined && 
+                         marginBetAlliance === actualWinner && 
+                         margin >= marginThreshold;
                 if (marginThreshold !== undefined) {
-                  console.log(`  Margin bet: ${betWon ? 'WON' : 'LOST'} - Actual margin: ${margin}, threshold: ${marginThreshold}`);
+                  console.log(`  Margin bet: ${betWon ? 'WON' : 'LOST'} - Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}, Actual margin: ${margin}, threshold: ${marginThreshold}`);
                 } else {
                   console.log(`  Margin bet: LOST - No margin threshold in details`);
                 }

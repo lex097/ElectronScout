@@ -1,9 +1,10 @@
 // app/select-team.tsx - Team Selection Screen
 import { useEventMatches } from '@/hooks/useEventMatches';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -22,9 +23,29 @@ export default function SelectTeamScreen() {
   const { matchKey, matchNumber, compLevel, eventKey } = params;
 
   const [bettingModalVisible, setBettingModalVisible] = useState(false);
+  const borderOpacity = useRef(new Animated.Value(0.3)).current;
 
   // Fetch matches to get the specific match
   const { data: matches, isLoading } = useEventMatches(eventKey || null);
+
+  // Animate border opacity for flashing effect
+  useEffect(() => {
+    const animate = () => {
+      Animated.sequence([
+        Animated.timing(borderOpacity, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(borderOpacity, {
+          toValue: 0.5,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ]).start(() => animate());
+    };
+    animate();
+  }, [borderOpacity]);
 
   const match = useMemo(() => {
     if (!matches || !matchKey) return null;
@@ -85,8 +106,21 @@ export default function SelectTeamScreen() {
         <TouchableOpacity
           style={styles.betButton}
           onPress={() => setBettingModalVisible(true)}
+          activeOpacity={0.8}
         >
-          <Text style={styles.betButtonText}>Place Bet</Text>
+          <Animated.View
+            style={[
+              styles.betButtonInner,
+              {
+                shadowOpacity: borderOpacity.interpolate({
+                  inputRange: [0.5, 1],
+                  outputRange: [0.6, 1],
+                }),
+              },
+            ]}
+          >
+            <Text style={styles.betButtonText}>Place Bet</Text>
+          </Animated.View>
         </TouchableOpacity>
 
         {/* Red Alliance */}
@@ -176,23 +210,29 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   betButton: {
-    backgroundColor: '#ff6600',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  betButtonInner: {
+    backgroundColor: '#3a2a1a', // Slight orange tint like red (#3a2a2a) and blue (#2a2a3a) 
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 2,
+    borderColor: '#ff6600',
+    shadowColor: '#ff6600',
+    shadowOffset: {
+      width: 0,
+      height: 0,
+    },
+    shadowRadius: 8,
+    elevation: 8,
   },
   betButtonText: {
     color: '#fff',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   allianceSection: {
     marginBottom: 24,

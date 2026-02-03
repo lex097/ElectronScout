@@ -59,7 +59,7 @@ export default function AnalyticsScreen() {
         if (allMatches.length > 0) {
           const analytics = analyticsService.calculateTeamAnalytics(allMatches);
           setTeamAnalytics(analytics);
-        } else {
+      } else {
           setTeamAnalytics(new Map());
         }
       } else {
@@ -87,13 +87,13 @@ export default function AnalyticsScreen() {
         }));
         
         setTeamMatches(matchesAsMatchData);
-        
+
         // Calculate analytics using the same service as local data
         if (matchesAsMatchData.length > 0) {
           const analytics = analyticsService.calculateTeamAnalytics(matchesAsMatchData);
-          setTeamAnalytics(analytics);
-        } else {
-          setTeamAnalytics(new Map());
+        setTeamAnalytics(analytics);
+      } else {
+        setTeamAnalytics(new Map());
         }
       }
     } catch (error) {
