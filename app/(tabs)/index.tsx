@@ -7,8 +7,10 @@ import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, NativeScrollEvent, N
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
 import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
+import { bettingService } from '../../services/bettingService';
 import { db } from '../../services/database';
 import { useAuthStore } from '../../stores/authStore';
+import { EARNED_PER_MATCH, useEbucksStore } from '../../stores/ebucksStore';
 import { MatchData } from '../../types/match';
 
 const TBA_MODE_KEY = 'tba_mode_enabled';
@@ -55,6 +57,8 @@ export default function MatchScoutScreen() {
   const isShiftPressedRef = useRef<boolean>(false);
   const insets = useSafeAreaInsets();
   const getScoutName = useAuthStore((state) => state.getScoutName);
+  const earnEbucks = useEbucksStore((state) => state.earnEbucks);
+  const refreshBalance = useEbucksStore((state) => state.refreshBalance);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
   const autonomousPhase = ACTIVE_GAME_CONFIG.phases.find(p => p.id === 'auto');
@@ -550,9 +554,29 @@ export default function MatchScoutScreen() {
 
       await db.saveMatch(matchData);
       
+      // Award ebucks for scouting match
+      await earnEbucks(EARNED_PER_MATCH, `Scouted match ${matchNumber} for team ${teamNumber}`);
+      
+      // Check and resolve bets if in TBA mode and match key is available
+      if (isTBAMode) {
+        try {
+          const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
+          if (matchKey) {
+            console.log(`[Betting] Checking bets for match after scouting: ${matchKey}`);
+            // Check and resolve bets for this match
+            await bettingService.checkAndResolveBets(matchKey);
+            // Refresh balance to show any winnings
+            await refreshBalance();
+          }
+        } catch (error) {
+          console.error('Error checking/resolving bets after match save:', error);
+          // Don't show error to user, just log it
+        }
+      }
+      
       Alert.alert(
         'Success',
-        `Match ${matchNumber} for team ${teamNumber} saved!`,
+        `Match ${matchNumber} for team ${teamNumber} saved! You earned ${EARNED_PER_MATCH} ebucks!`,
         [
           {
             text: 'New Match',
@@ -777,7 +801,7 @@ export default function MatchScoutScreen() {
           {showCountdownToast && autonomousTimeRemaining !== null && autonomousTimeRemaining > 0 && (
             <View style={styles.countdownToast}>
               <Text style={styles.countdownToastText}>
-                Time remaining before teleop: {autonomousTimeRemaining}
+                Teleop starts in: {autonomousTimeRemaining}
               </Text>
             </View>
           )}

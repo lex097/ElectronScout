@@ -1,15 +1,16 @@
 // app/select-team.tsx - Team Selection Screen
 import { useEventMatches } from '@/hooks/useEventMatches';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BettingModal from '../components/betting/BettingModal';
 
 export default function SelectTeamScreen() {
   const params = useLocalSearchParams<{
@@ -19,6 +20,8 @@ export default function SelectTeamScreen() {
     eventKey: string;
   }>();
   const { matchKey, matchNumber, compLevel, eventKey } = params;
+
+  const [bettingModalVisible, setBettingModalVisible] = useState(false);
 
   // Fetch matches to get the specific match
   const { data: matches, isLoading } = useEventMatches(eventKey || null);
@@ -78,6 +81,14 @@ export default function SelectTeamScreen() {
       </View>
 
       <View style={styles.content}>
+        {/* Place Bet Button */}
+        <TouchableOpacity
+          style={styles.betButton}
+          onPress={() => setBettingModalVisible(true)}
+        >
+          <Text style={styles.betButtonText}>Place Bet</Text>
+        </TouchableOpacity>
+
         {/* Red Alliance */}
         <View style={styles.allianceSection}>
           <View style={styles.allianceHeader}>
@@ -116,6 +127,16 @@ export default function SelectTeamScreen() {
           </View>
         </View>
       </View>
+
+      {/* Betting Modal */}
+      {match && (
+        <BettingModal
+          visible={bettingModalVisible}
+          onClose={() => setBettingModalVisible(false)}
+          match={match}
+          eventKey={eventKey}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -153,6 +174,25 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
+  },
+  betButton: {
+    backgroundColor: '#ff6600',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  betButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   allianceSection: {
     marginBottom: 24,

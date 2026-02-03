@@ -74,14 +74,14 @@ function computeLockMs(failedAttempts: number, baseLockMs: number) {
 }
 
 export const useAdminStore = create<AdminState>((set, get) => ({
-    unlockedAtMs: null,
-    failedAttempts: 0,
-    lockUntilMs: null,
-    lastFailureAtMs: null,
+  unlockedAtMs: null,
+  failedAttempts: 0,
+  lockUntilMs: null,
+  lastFailureAtMs: null,
 
-    sessionTtlMs: 15 * 60 * 1000,
-    maxAttemptsBeforeLock: 5,
-    baseLockMs: 60 * 1000,
+  sessionTtlMs: 15 * 60 * 1000,
+  maxAttemptsBeforeLock: 5,
+  baseLockMs: 60 * 1000,
 
   isUnlocked: (nowMs = now()) => {
     const { unlockedAtMs, sessionTtlMs } = get();

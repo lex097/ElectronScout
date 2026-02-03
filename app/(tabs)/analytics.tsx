@@ -46,8 +46,6 @@ export default function AnalyticsScreen() {
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
 
-      let matchesToAnalyze: MatchData[] = [];
-      
       // Get event_key from storage for filtering team data
       const eventKey = await AsyncStorage.getItem('selected_event_key');
       
@@ -56,20 +54,47 @@ export default function AnalyticsScreen() {
         // Note: Local database doesn't store event_key, so we can't filter by event
         const allMatches = await db.getAllMatches();
         setMatches(allMatches);
-        matchesToAnalyze = allMatches;
+        
+        // Calculate analytics using existing service (manual calculation)
+        if (allMatches.length > 0) {
+          const analytics = analyticsService.calculateTeamAnalytics(allMatches);
+          setTeamAnalytics(analytics);
+        } else {
+          setTeamAnalytics(new Map());
+        }
       } else {
-        // Load from Supabase (filtered by team_id and optionally event_key)
-        const allTeamMatches = await supabaseSyncService.getAllTeamMatches(eventKey || undefined);
-        setTeamMatches(allTeamMatches);
-        matchesToAnalyze = allTeamMatches;
-      }
+        // Load from Supabase and use same calculation method as local data
+        if (!eventKey) {
+          Alert.alert('No Event Selected', 'Please select an event to view team analytics');
+          setTeamAnalytics(new Map());
+          return;
+        }
 
-      // Calculate analytics
-      if (matchesToAnalyze.length > 0) {
-        const analytics = analyticsService.calculateTeamAnalytics(matchesToAnalyze);
-        setTeamAnalytics(analytics);
-      } else {
-        setTeamAnalytics(new Map());
+        // Fetch matches from Supabase
+        const supabaseMatches = await supabaseSyncService.getAllTeamMatches(eventKey);
+        
+        // Convert Supabase matches to MatchData format
+        const matchesAsMatchData: MatchData[] = supabaseMatches.map((match: any) => ({
+          id: match.id,
+          matchNumber: match.matchNumber,
+          teamNumber: match.teamNumber,
+          scouterId: match.scouterId,
+          gameYear: match.gameYear,
+          metrics: match.metrics,
+          timestamp: match.timestamp,
+          synced: match.synced,
+          notes: match.notes,
+        }));
+        
+        setTeamMatches(matchesAsMatchData);
+        
+        // Calculate analytics using the same service as local data
+        if (matchesAsMatchData.length > 0) {
+          const analytics = analyticsService.calculateTeamAnalytics(matchesAsMatchData);
+          setTeamAnalytics(analytics);
+        } else {
+          setTeamAnalytics(new Map());
+        }
       }
     } catch (error) {
       console.error('Failed to load data:', error);
@@ -275,6 +300,7 @@ export default function AnalyticsScreen() {
       
       switch (metric.type) {
         case 'counter':
+        case 'rapidCounter':
           if (typeof value === 'number' && metric.points) {
             points = value * metric.points;
             phasePoints += points;
@@ -301,6 +327,12 @@ export default function AnalyticsScreen() {
   };
 
   const getAveragePhasePoints = (team: TeamAnalytics, phaseId: string): number => {
+    // If we have phase data in metrics (from optimized Supabase query), use it
+    if (team.metrics[phaseId]?.average !== undefined) {
+      return team.metrics[phaseId].average;
+    }
+    
+    // Otherwise, calculate from matchHistory (for local data)
     if (team.matchHistory.length === 0) return 0;
     
     const totalPhasePoints = team.matchHistory.reduce((sum, match) => {

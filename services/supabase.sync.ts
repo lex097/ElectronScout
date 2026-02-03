@@ -30,6 +30,11 @@ export class SupabaseSyncService {
     return createClient(supabaseUrl!, serviceRoleKey);
   }
 
+  // Public method to get Supabase client for other services
+  getClient() {
+    return this.getSupabaseClient();
+  }
+
   /**
    * Get team number from AsyncStorage (or mock)
    */

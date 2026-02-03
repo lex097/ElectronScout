@@ -11,6 +11,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/components/useColorScheme';
 import { queryClient } from '@/config/queryClient';
 import { useAuthStore } from '@/stores/authStore';
+import { useEbucksStore } from '@/stores/ebucksStore';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -51,10 +52,18 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const { isAuthenticated, user, isLoading, checkAuth } = useAuthStore();
+  const initializeEbucks = useEbucksStore((state) => state.initialize);
 
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      // Initialize ebucks store when user is authenticated
+      initializeEbucks();
+    }
+  }, [isAuthenticated, user, initializeEbucks]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -88,7 +97,7 @@ function RootLayoutNav() {
           <Stack.Screen name="team-created" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-event" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-match" options={{ gestureEnabled: true }} />
-          <Stack.Screen name="select-team" />
+          <Stack.Screen name="select-team" options={{ gestureEnabled: true }} />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="(admin)" />
         </Stack>

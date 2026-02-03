@@ -498,7 +498,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         
         // Only notify parent if both are collapsed
         if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
-          onExpandedChange?.(false); // Re-enable scrolling immediately
+        onExpandedChange?.(false); // Re-enable scrolling immediately
         }
         
         Animated.parallel([
@@ -563,7 +563,7 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
         
         // Only notify parent if both are collapsed
         if (!isExpandedRef.current && !decrementIsExpandedRef.current) {
-          onExpandedChange?.(false); // Re-enable scrolling immediately
+        onExpandedChange?.(false); // Re-enable scrolling immediately
         }
         
         Animated.parallel([
