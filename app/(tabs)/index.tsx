@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
-import { ACTIVE_GAME_CONFIG, getInitialMatchData, Metric } from '../../config/gameConfig';
+import { ACTIVE_GAME_CONFIG, getDefaultsForPhases, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { bettingService } from '../../services/bettingService';
 import { db } from '../../services/database';
 import { useAuthStore } from '../../stores/authStore';
@@ -258,6 +258,9 @@ export default function MatchScoutScreen() {
     if (matchStarted && autonomousTimeRemaining === 0 && isAutonomousPhase && autonomousTimerCompleted && !hasAutoSwitchedRef.current) {
       console.log('[Timer] Auto-switching to teleop phase - timer just completed');
       hasAutoSwitchedRef.current = true;
+      // Reset teleop and endgame metrics to defaults so pre-match edits are cleared
+      const teleopAndEndgameDefaults = getDefaultsForPhases(['teleop', 'endgame']);
+      setMetrics((prev) => ({ ...prev, ...teleopAndEndgameDefaults }));
       const teleopIndex = ACTIVE_GAME_CONFIG.phases.findIndex(p => p.id === 'teleop');
       if (teleopIndex !== -1) {
         setCurrentPhaseIndex(teleopIndex);

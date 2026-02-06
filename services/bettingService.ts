@@ -111,8 +111,37 @@ class BettingService {
         return { teams: [], average: 0, confidence: 0.0 };
       }
 
+      // Refresh materialized view to ensure we have latest data
+      await teamStatisticsService.refreshTeamStatistics();
+
       // Get statistics for all teams in alliance
       const teamStats = await teamStatisticsService.getTeamStatisticsBatch(teams, eventKey);
+      
+      // Debug logging with EPA status
+      const teamStatsArray = Array.from(teamStats.entries()).map(([teamNum, stats]) => ({
+        teamNumber: teamNum,
+        matchCount: stats.matchCount,
+        avgMatchScore: stats.avgMatchScore,
+        eventKey: stats.eventKey,
+        confidence: Math.min(1.0, stats.matchCount * 0.2),
+        usesEPA: stats.matchCount < 4, // Teams with < 4 matches likely use EPA
+      }));
+      
+      console.log('🔍 Alliance Averages Debug:', {
+        alliance: teams.length === 3 ? 'Red' : 'Blue',
+        teams,
+        eventKey,
+        teamStatsSize: teamStats.size,
+        teamStatsData: teamStatsArray,
+      });
+      
+      // Log EPA usage summary
+      const teamsUsingEPA = teamStatsArray.filter(t => t.usesEPA);
+      if (teamsUsingEPA.length > 0) {
+        console.log(`📊 [EPA SUMMARY] ${teamsUsingEPA.length} team(s) using EPA blend:`, 
+          teamsUsingEPA.map(t => `Team ${t.teamNumber} (${t.matchCount} matches, ${(t.confidence * 100).toFixed(0)}% confidence, avg: ${t.avgMatchScore.toFixed(2)})`)
+        );
+      }
       
       let totalAverage = 0;
       let totalConfidence = 0;
@@ -121,14 +150,39 @@ class BettingService {
       teams.forEach(teamNumber => {
         const stats = teamStats.get(teamNumber);
         if (stats) {
+          const confidence = Math.min(1.0, stats.matchCount * 0.2);
+          const usesEPA = stats.matchCount < 4;
+          
+          console.log(`✅ Team ${teamNumber} stats:`, {
+            matchCount: stats.matchCount,
+            avgMatchScore: stats.avgMatchScore.toFixed(2),
+            confidence: `${(confidence * 100).toFixed(0)}%`,
+            usesEPA: usesEPA ? 'Yes (blended with Statbotics EPA)' : 'No (scouted only)',
+            eventKey: stats.eventKey,
+            note: usesEPA ? 'EPA factored into avgMatchScore' : 'Pure scouted data',
+          });
+          
           totalAverage += stats.avgMatchScore;
-          totalConfidence += Math.min(1.0, stats.matchCount * 0.2);
+          totalConfidence += confidence;
           validTeams++;
+        } else {
+          console.warn(`⚠️ Team ${teamNumber} stats NOT found - no scouted data AND no EPA available. This team will be excluded from alliance average.`);
         }
       });
 
       const average = validTeams > 0 ? totalAverage / validTeams : 0;
       const confidence = validTeams > 0 ? totalConfidence / validTeams : 0.0;
+
+      console.log('📊 Alliance Averages Result:', {
+        teams,
+        validTeams,
+        average: average.toFixed(2),
+        confidence: confidence.toFixed(2),
+        note: validTeams < teams.length 
+          ? `⚠️ ${teams.length - validTeams} team(s) excluded (no data available)` 
+          : '✅ All teams included',
+        epaIncluded: teamStatsArray.some(t => t.usesEPA) ? 'Yes - EPA factored into averages' : 'No - All teams have sufficient scouted data',
+      });
 
       return {
         teams,
@@ -200,29 +254,82 @@ class BettingService {
     blueConf: number,
     matchConf: number
   ): { redWinProb: number; blueWinProb: number; redOdds: number; blueOdds: number } {
+    console.log(`🎲 [WIN PROB] Calculating winner odds:`, {
+      redAvg: redAvg.toFixed(2),
+      blueAvg: blueAvg.toFixed(2),
+      scoreDifference: (redAvg - blueAvg).toFixed(2),
+      redConf: redConf.toFixed(2),
+      blueConf: blueConf.toFixed(2),
+      matchConf: matchConf.toFixed(2),
+    });
+    
     // Calculate data-driven win probability
     let redWinProbData = 0.5; // Default 50/50
 
     if (redAvg > 0 && blueAvg > 0) {
       // Both alliances have data
-      const scoreDifference = redAvg - blueAvg;
-      // Use logistic function to convert score difference to probability
-      redWinProbData = 1 / (1 + Math.exp(-scoreDifference / 10));
+      const totalScore = redAvg + blueAvg;
+      
+      // Calculate relative contribution percentages
+      const redContribution = redAvg / totalScore; // 0.0 to 1.0 (percentage of total)
+      const blueContribution = blueAvg / totalScore;
+      
+      // Use raw contribution percentage directly as win probability
+      // If red contributes 60% of total score, red's win probability is 60%
+      redWinProbData = redContribution;
+      
       // Clamp to [0.2, 0.8] for safety
       redWinProbData = Math.max(0.2, Math.min(0.8, redWinProbData));
+      
+      console.log(`🎲 [WIN PROB] Both alliances have data (contribution-based):`, {
+        redAvg: redAvg.toFixed(2),
+        blueAvg: blueAvg.toFixed(2),
+        totalScore: totalScore.toFixed(2),
+        redContribution: `${(redContribution * 100).toFixed(1)}%`,
+        blueContribution: `${(blueContribution * 100).toFixed(1)}%`,
+        rawProb: redWinProbData.toFixed(3),
+        clampedProb: redWinProbData.toFixed(3),
+        explanation: `Using raw contribution: Red ${(redContribution * 100).toFixed(1)}% contribution = ${(redWinProbData * 100).toFixed(1)}% win probability`,
+      });
     } else if (redAvg > 0 && blueAvg === 0) {
       // Only red has data
       redWinProbData = 0.5 + (redAvg / 200) * redConf;
       redWinProbData = Math.max(0.3, Math.min(0.7, redWinProbData));
+      console.log(`🎲 [WIN PROB] Only red has data:`, {
+        redAvg: redAvg.toFixed(2),
+        redConf: redConf.toFixed(2),
+        prob: redWinProbData.toFixed(3),
+      });
     } else if (redAvg === 0 && blueAvg > 0) {
       // Only blue has data
       redWinProbData = 0.5 - (blueAvg / 200) * blueConf;
       redWinProbData = Math.max(0.3, Math.min(0.7, redWinProbData));
+      console.log(`🎲 [WIN PROB] Only blue has data:`, {
+        blueAvg: blueAvg.toFixed(2),
+        blueConf: blueConf.toFixed(2),
+        prob: redWinProbData.toFixed(3),
+      });
+    } else {
+      console.log(`🎲 [WIN PROB] No data for either alliance, using 50/50`);
     }
 
     // Blend with neutral (50/50) based on match confidence
-    const finalRedWinProb = (0.5 * (1 - matchConf)) + (redWinProbData * matchConf);
+    // Reduced impact: even low confidence has minimal blending toward 50/50
+    // Use a small factor (0.1) so that low confidence only slightly adjusts probabilities
+    const neutralWeight = (1 - matchConf) * 0.1; // Max 10% blending even at confidence 0
+    const dataWeight = 1 - neutralWeight;
+    const finalRedWinProb = (0.5 * neutralWeight) + (redWinProbData * dataWeight);
     const finalBlueWinProb = 1 - finalRedWinProb;
+
+    console.log(`🎲 [WIN PROB] Final probabilities after confidence blending:`, {
+      dataDrivenProb: redWinProbData.toFixed(3),
+      matchConfidence: matchConf.toFixed(3),
+      neutralWeight: `${(neutralWeight * 100).toFixed(1)}%`,
+      dataWeight: `${(dataWeight * 100).toFixed(1)}%`,
+      finalRedProb: finalRedWinProb.toFixed(3),
+      finalBlueProb: finalBlueWinProb.toFixed(3),
+      explanation: `Blended ${(dataWeight * 100).toFixed(1)}% data-driven + ${(neutralWeight * 100).toFixed(1)}% neutral (50/50)`,
+    });
 
     // Calculate odds
     let redOdds = 1 / finalRedWinProb;
@@ -235,6 +342,11 @@ class BettingService {
     // Ensure minimum odds of 1.1 and maximum of 10.0
     redOdds = Math.max(1.1, Math.min(10.0, redOdds));
     blueOdds = Math.max(1.1, Math.min(10.0, blueOdds));
+
+    console.log(`🎲 [WIN PROB] Final odds:`, {
+      redOdds: redOdds.toFixed(2),
+      blueOdds: blueOdds.toFixed(2),
+    });
 
     return {
       redWinProb: finalRedWinProb,
@@ -286,7 +398,10 @@ class BettingService {
     dataProb = Math.max(0.2, Math.min(0.8, dataProb));
 
     // Blend with neutral (50/50) based on match confidence
-    const finalProb = (0.5 * (1 - matchConf)) + (dataProb * matchConf);
+    // Reduced impact: even low confidence has minimal blending toward 50/50
+    const neutralWeight = (1 - matchConf) * 0.1; // Max 10% blending even at confidence 0
+    const dataWeight = 1 - neutralWeight;
+    const finalProb = (0.5 * neutralWeight) + (dataProb * dataWeight);
     const clampedProb = Math.max(0.1, Math.min(0.9, finalProb));
 
     // Calculate odds
@@ -347,7 +462,10 @@ class BettingService {
     }
 
     // Blend with neutral (50/50) based on match confidence
-    const finalProb = (0.5 * (1 - matchConf)) + (dataProb * matchConf);
+    // Reduced impact: even low confidence has minimal blending toward 50/50
+    const neutralWeight = (1 - matchConf) * 0.1; // Max 10% blending even at confidence 0
+    const dataWeight = 1 - neutralWeight;
+    const finalProb = (0.5 * neutralWeight) + (dataProb * dataWeight);
     const clampedProb = Math.max(0.1, Math.min(0.9, finalProb));
 
     // Calculate odds
@@ -407,12 +525,17 @@ class BettingService {
     console.log('📊 Match Odds Calculation:', {
       redAvg: redAvg.toFixed(2),
       blueAvg: blueAvg.toFixed(2),
+      scoreDifference: (redAvg - blueAvg).toFixed(2),
       expectedMargin: expectedMargin.toFixed(2),
       expectedTotal: expectedTotal.toFixed(2),
+      redConfidence: redAlliance.confidence.toFixed(2),
+      blueConfidence: blueAlliance.confidence.toFixed(2),
+      matchConfidence: matchConf.toFixed(2),
       calculation: {
         margin: `|${redAvg.toFixed(2)} - ${blueAvg.toFixed(2)}| = ${expectedMargin.toFixed(2)}`,
         total: `${redAvg.toFixed(2)} + ${blueAvg.toFixed(2)} = ${expectedTotal.toFixed(2)}`,
       },
+      note: redAvg === 0 || blueAvg === 0 ? '⚠️ One or both alliances have 0 average - may be using EPA or no data' : '✅ Both alliances have data',
     });
 
     // Get league average if threshold is met

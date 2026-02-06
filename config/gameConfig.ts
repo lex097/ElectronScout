@@ -147,7 +147,7 @@ export interface GameConfig {
 
 // 2026 GAME CONFIG - Change this each year!
 export const GAME_2026: GameConfig = {
-  year: 2026,
+  year: 2025,
   gameName: "Rebuilt",
   phases: [
     {
@@ -246,6 +246,30 @@ export const getInitialMatchData = (config: GameConfig = ACTIVE_GAME_CONFIG) => 
     });
   });
   
+  return metrics;
+};
+
+// Helper to get default values for specific phases (e.g. reset teleop/endgame when auto ends)
+export const getDefaultsForPhases = (
+  phaseIds: string[],
+  config: GameConfig = ACTIVE_GAME_CONFIG
+): Record<string, any> => {
+  const metrics: Record<string, any> = {};
+  config.phases
+    .filter((p) => phaseIds.includes(p.id))
+    .forEach((phase) => {
+      phase.metrics.forEach((metric) => {
+        metrics[metric.id] =
+          metric.defaultValue ??
+          (metric.type === 'counter' || metric.type === 'rapidCounter'
+            ? 0
+            : metric.type === 'boolean'
+              ? false
+              : metric.type === 'select'
+                ? metric.options?.[0] ?? null
+                : null);
+      });
+    });
   return metrics;
 };
 

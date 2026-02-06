@@ -1,4 +1,5 @@
 // services/teamStatisticsService.ts
+import { getTeamYearEPABatch } from '../api/services/statbotics';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 import { supabaseSyncService } from './supabase.sync';
 
@@ -83,6 +84,7 @@ class TeamStatisticsService {
 
   /**
    * Get team statistics for multiple teams in a single query
+   * Blends scouted data with Statbotics EPA when confidence is low
    */
   async getTeamStatisticsBatch(
     teamNumbers: number[],
@@ -108,17 +110,150 @@ class TeamStatisticsService {
 
       const { data, error } = await query;
 
-      if (error || !data) {
-        return new Map();
+      // Debug logging
+      console.log('🔍 Team Statistics Query:', {
+        teamNumbers,
+        eventKey,
+        queryResult: data?.length || 0,
+        error: error?.message,
+      });
+
+      if (error) {
+        console.error('Error querying team_statistics:', error);
+        // Fallback: try to calculate from raw matches if view fails
+        return await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('⚠️ No data in team_statistics view. Checking raw matches and EPA...');
+        console.log(`🔍 [FALLBACK] Querying teams: ${teamNumbers.length} teams for event ${eventKey || 'null'}`);
+        
+        // Fallback: calculate from raw matches, then add EPA for teams with no/low data
+        const fallbackStats = await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+        
+        console.log(`🔍 [FALLBACK] Fallback returned ${fallbackStats.size} teams with data`);
+        console.log(`🔍 [FALLBACK] Teams in fallback result:`, Array.from(fallbackStats.keys()));
+        
+        // Identify teams needing EPA: those with no data OR low match count (< 4)
+        const teamsNeedingEPA: number[] = [];
+        const teamsStillMissing = teamNumbers.filter(tn => !fallbackStats.has(tn));
+        
+        console.log(`🔍 [FALLBACK] Teams still missing after fallback: ${teamsStillMissing.length}`, teamsStillMissing);
+        
+        // Check teams from fallback that have low match counts
+        fallbackStats.forEach((stats, teamNumber) => {
+          const matchCount = stats.matchCount;
+          const confidence = Math.min(1.0, matchCount * 0.2);
+          console.log(`🔍 [FALLBACK] Team ${teamNumber}: ${matchCount} matches, ${(confidence * 100).toFixed(0)}% confidence, avg: ${stats.avgMatchScore.toFixed(2)}`);
+          
+          if (confidence < 0.8 && matchCount < 4) {
+            teamsNeedingEPA.push(teamNumber);
+            console.log(`📊 [EPA CHECK] Team ${teamNumber} from fallback needs EPA: ${matchCount} matches, ${(confidence * 100).toFixed(0)}% confidence`);
+          }
+        });
+        
+        // Add teams with no data
+        teamsNeedingEPA.push(...teamsStillMissing);
+        
+        console.log(`🔍 [EPA CHECK] Total teams needing EPA after fallback: ${teamsNeedingEPA.length}`, teamsNeedingEPA);
+        console.log(`🔍 [EPA CHECK] Breakdown: ${teamsStillMissing.length} with no data, ${teamsNeedingEPA.length - teamsStillMissing.length} with low match count`);
+        
+        if (teamsNeedingEPA.length > 0) {
+          try {
+            const year = ACTIVE_GAME_CONFIG.year;
+            console.log(`📊 [EPA FETCH] Fetching Statbotics EPA for ${teamsNeedingEPA.length} teams (year ${year}):`, teamsNeedingEPA);
+            
+            const epaMap = await getTeamYearEPABatch(teamsNeedingEPA, year);
+            
+            console.log(`📊 [EPA FETCH] Successfully fetched EPA for ${epaMap.size} out of ${teamsNeedingEPA.length} teams`);
+            
+            teamsNeedingEPA.forEach((teamNumber) => {
+              const stats = fallbackStats.get(teamNumber);
+              const epa = epaMap.get(teamNumber);
+              
+              if (stats && epa) {
+                // Blend EPA with scouted data
+                const matchCount = stats.matchCount;
+                const scoutedAvg = stats.avgMatchScore;
+                const epaValue = epa.epa?.total_points?.mean || 0;
+                
+                const confidence = Math.min(1.0, matchCount * 0.2);
+                const epaWeight = Math.max(0, 1 - (confidence / 0.8));
+                const scoutedWeight = 1 - epaWeight;
+                
+                const blendedAvg = (scoutedAvg * scoutedWeight) + (epaValue * epaWeight);
+                
+                console.log(`📊 [EPA BLEND] Team ${teamNumber}:`, {
+                  matchCount,
+                  confidence: `${(confidence * 100).toFixed(0)}%`,
+                  scoutedAvg: scoutedAvg.toFixed(2),
+                  epaValue: epaValue.toFixed(2),
+                  blending: `${(epaWeight * 100).toFixed(0)}% EPA + ${(scoutedWeight * 100).toFixed(0)}% Scouted`,
+                  finalAvg: blendedAvg.toFixed(2),
+                });
+                
+                fallbackStats.set(teamNumber, {
+                  ...stats,
+                  avgMatchScore: Math.round(blendedAvg * 100) / 100,
+                });
+              } else if (!stats && epa) {
+                // No scouted data at all, use EPA directly
+                const epaValue = epa.epa?.total_points?.mean || 0;
+                console.log(`📊 [EPA ONLY] Team ${teamNumber} - No scouted data, using Statbotics EPA:`, {
+                  epaValue: epaValue.toFixed(2),
+                  matchCount: 0,
+                  source: 'Statbotics',
+                });
+                
+                fallbackStats.set(teamNumber, {
+                  teamNumber,
+                  eventKey: eventKey || null,
+                  matchCount: 0,
+                  avgMatchScore: Math.round(epaValue * 100) / 100,
+                  stdDevScore: 0,
+                  minScore: 0,
+                  maxScore: 0,
+                  totalPoints: 0,
+                  lastMatchTimestamp: 0,
+                  firstMatchTimestamp: 0,
+                });
+              } else if (!epa) {
+                console.log(`⚠️ [NO DATA] Team ${teamNumber} - No scouted data and no Statbotics EPA available`);
+              }
+            });
+          } catch (epaError) {
+            console.error('Error fetching Statbotics EPA for missing teams:', epaError);
+          }
+        }
+        
+        return fallbackStats;
       }
 
       const statsMap = new Map<number, TeamStatistics>();
+      const teamsNeedingEPA: number[] = [];
+
+      // First pass: process scouted data and identify teams needing EPA
+      console.log(`🔍 [EPA CHECK] Processing ${data.length} teams from database...`);
       data.forEach((row: any) => {
+        const matchCount = row.match_count || 0;
+        const avgMatchScore = parseFloat(row.avg_match_score) || 0;
+        
+        // Calculate confidence (0.2 per match, max 1.0)
+        const confidence = Math.min(1.0, matchCount * 0.2);
+        
+        // If confidence < 0.8, we'll blend with EPA
+        if (confidence < 0.8 && matchCount < 4) {
+          console.log(`📊 [EPA CHECK] Team ${row.team_number} needs EPA: ${matchCount} matches, ${(confidence * 100).toFixed(0)}% confidence`);
+          teamsNeedingEPA.push(row.team_number);
+        } else {
+          console.log(`✅ [EPA CHECK] Team ${row.team_number} has enough data: ${matchCount} matches, ${(confidence * 100).toFixed(0)}% confidence`);
+        }
+
         statsMap.set(row.team_number, {
           teamNumber: row.team_number,
           eventKey: row.event_key,
-          matchCount: row.match_count,
-          avgMatchScore: parseFloat(row.avg_match_score) || 0,
+          matchCount,
+          avgMatchScore,
           stdDevScore: parseFloat(row.std_dev_score) || 0,
           minScore: row.min_score || 0,
           maxScore: row.max_score || 0,
@@ -128,9 +263,254 @@ class TeamStatisticsService {
         });
       });
 
+      // Second pass: fetch EPA for teams with insufficient data and blend
+      console.log(`🔍 [EPA CHECK] Teams needing EPA: ${teamsNeedingEPA.length}`, teamsNeedingEPA);
+      if (teamsNeedingEPA.length > 0) {
+        try {
+          const year = ACTIVE_GAME_CONFIG.year;
+          console.log(`📊 [EPA FETCH] Starting EPA fetch for ${teamsNeedingEPA.length} teams (year ${year}):`, teamsNeedingEPA);
+          console.log(`📊 [EPA FETCH] Active game config year: ${year}`);
+          console.log(`📊 [EPA FETCH] About to call getTeamYearEPABatch...`);
+          
+          const epaMap = await getTeamYearEPABatch(teamsNeedingEPA, year);
+          
+          console.log(`📊 [EPA FETCH] EPA fetch completed. Got ${epaMap.size} out of ${teamsNeedingEPA.length} teams`);
+          console.log(`📊 [EPA FETCH] Teams with EPA:`, Array.from(epaMap.keys()));
+          
+          // Blend EPA with scouted data
+          teamsNeedingEPA.forEach((teamNumber) => {
+            const stats = statsMap.get(teamNumber);
+            const epa = epaMap.get(teamNumber);
+            
+            if (stats && epa) {
+              const matchCount = stats.matchCount;
+              const scoutedAvg = stats.avgMatchScore;
+              const epaValue = epa.epa?.total_points?.mean || 0;
+              
+              // Calculate confidence (0.2 per match, max 1.0)
+              const confidence = Math.min(1.0, matchCount * 0.2);
+              
+              // Blend: at confidence 0.0 = 100% EPA, at confidence 0.8 = 100% scouted
+              // Linear interpolation between 0.0 and 0.8
+              const epaWeight = Math.max(0, 1 - (confidence / 0.8));
+              const scoutedWeight = 1 - epaWeight;
+              
+              const blendedAvg = (scoutedAvg * scoutedWeight) + (epaValue * epaWeight);
+              
+              console.log(`📊 [EPA BLEND] Team ${teamNumber}:`, {
+                matchCount,
+                confidence: `${(confidence * 100).toFixed(0)}%`,
+                scoutedAvg: scoutedAvg.toFixed(2),
+                epaValue: epaValue.toFixed(2),
+                blending: `${(epaWeight * 100).toFixed(0)}% EPA + ${(scoutedWeight * 100).toFixed(0)}% Scouted`,
+                finalAvg: blendedAvg.toFixed(2),
+              });
+              
+              // Update with blended average
+              statsMap.set(teamNumber, {
+                ...stats,
+                avgMatchScore: Math.round(blendedAvg * 100) / 100,
+              });
+            } else if (!stats && epa) {
+              // No scouted data at all, use EPA directly
+              const epaValue = epa.epa?.total_points?.mean || 0;
+              console.log(`📊 [EPA ONLY] Team ${teamNumber} - No scouted data, using Statbotics EPA:`, {
+                epaValue: epaValue.toFixed(2),
+                matchCount: 0,
+                source: 'Statbotics',
+              });
+              
+              statsMap.set(teamNumber, {
+                teamNumber,
+                eventKey: eventKey || null,
+                matchCount: 0,
+                avgMatchScore: Math.round(epaValue * 100) / 100,
+                stdDevScore: 0,
+                minScore: 0,
+                maxScore: 0,
+                totalPoints: 0,
+                lastMatchTimestamp: 0,
+                firstMatchTimestamp: 0,
+              });
+            }
+          });
+        } catch (epaError) {
+          console.error('Error fetching Statbotics EPA:', epaError);
+          // Continue with scouted data only if EPA fetch fails
+        }
+      }
+
+      // Handle teams that weren't in the query results (no scouted data)
+      const missingTeams = teamNumbers.filter(tn => !statsMap.has(tn));
+      if (missingTeams.length > 0) {
+        try {
+          const year = ACTIVE_GAME_CONFIG.year;
+          console.log(`📊 [EPA FETCH] Fetching Statbotics EPA for ${missingTeams.length} teams with no scouted data (year ${year}):`, missingTeams);
+          
+          const epaMap = await getTeamYearEPABatch(missingTeams, year);
+          
+          console.log(`📊 [EPA FETCH] Successfully fetched EPA for ${epaMap.size} out of ${missingTeams.length} teams with no scouted data`);
+          
+          missingTeams.forEach((teamNumber) => {
+            const epa = epaMap.get(teamNumber);
+            if (epa) {
+              const epaValue = epa.epa?.total_points?.mean || 0;
+              console.log(`📊 [EPA ONLY] Team ${teamNumber} - No scouted data, using Statbotics EPA:`, {
+                epaValue: epaValue.toFixed(2),
+                matchCount: 0,
+                source: 'Statbotics',
+              });
+              
+              statsMap.set(teamNumber, {
+                teamNumber,
+                eventKey: eventKey || null,
+                matchCount: 0,
+                avgMatchScore: Math.round(epaValue * 100) / 100,
+                stdDevScore: 0,
+                minScore: 0,
+                maxScore: 0,
+                totalPoints: 0,
+                lastMatchTimestamp: 0,
+                firstMatchTimestamp: 0,
+              });
+            } else {
+              console.log(`⚠️ [NO DATA] Team ${teamNumber} - No scouted data and no Statbotics EPA available`);
+            }
+          });
+        } catch (epaError) {
+          console.error('Error fetching Statbotics EPA for missing teams:', epaError);
+        }
+      }
+
       return statsMap;
     } catch (error) {
       console.error('Error fetching team statistics batch:', error);
+      // Fallback: try to calculate from raw matches, then add EPA
+      const fallbackStats = await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+      
+      // Check which teams still have no data and fetch EPA for them
+      const teamsStillMissing = teamNumbers.filter(tn => !fallbackStats.has(tn));
+      console.log(`🔍 [EPA CHECK] Teams with no scouted data after error fallback: ${teamsStillMissing.length}`, teamsStillMissing);
+      
+      if (teamsStillMissing.length > 0) {
+        try {
+          const year = ACTIVE_GAME_CONFIG.year;
+          console.log(`📊 [EPA FETCH] Fetching Statbotics EPA for ${teamsStillMissing.length} teams after error (year ${year}):`, teamsStillMissing);
+          
+          const epaMap = await getTeamYearEPABatch(teamsStillMissing, year);
+          
+          teamsStillMissing.forEach((teamNumber) => {
+            const epa = epaMap.get(teamNumber);
+            if (epa) {
+              const epaValue = epa.epa?.total_points?.mean || 0;
+              console.log(`📊 [EPA ONLY] Team ${teamNumber} - No scouted data, using Statbotics EPA:`, {
+                epaValue: epaValue.toFixed(2),
+                matchCount: 0,
+                source: 'Statbotics',
+              });
+              
+              fallbackStats.set(teamNumber, {
+                teamNumber,
+                eventKey: eventKey || null,
+                matchCount: 0,
+                avgMatchScore: Math.round(epaValue * 100) / 100,
+                stdDevScore: 0,
+                minScore: 0,
+                maxScore: 0,
+                totalPoints: 0,
+                lastMatchTimestamp: 0,
+                firstMatchTimestamp: 0,
+              });
+            } else {
+              console.log(`⚠️ [NO DATA] Team ${teamNumber} - No scouted data and no Statbotics EPA available`);
+            }
+          });
+        } catch (epaError) {
+          console.error('Error fetching Statbotics EPA for missing teams after error:', epaError);
+        }
+      }
+      
+      return fallbackStats;
+    }
+  }
+
+  /**
+   * Fallback: Calculate statistics directly from matches table if view is empty
+   */
+  private async fallbackCalculateFromMatches(
+    teamNumbers: number[],
+    eventKey?: string
+  ): Promise<Map<number, TeamStatistics>> {
+    try {
+      console.log(`🔍 [FALLBACK] Starting fallback calculation for ${teamNumbers.length} teams, event: ${eventKey || 'null'}`);
+      const supabase = supabaseSyncService.getClient();
+      const statsMap = new Map<number, TeamStatistics>();
+
+      // Query matches directly for each team
+      for (const teamNumber of teamNumbers) {
+        let query = supabase
+          .from('matches')
+          .select('calculated_points, timestamp')
+          .eq('team_number', teamNumber);
+
+        if (eventKey) {
+          query = query.eq('event_key', eventKey);
+        } else {
+          query = query.is('event_key', null);
+        }
+
+        const { data: matches, error } = await query;
+
+        if (error) {
+          console.log(`⚠️ [FALLBACK] Error querying matches for team ${teamNumber}:`, error.message);
+          continue;
+        }
+
+        if (!matches || matches.length === 0) {
+          console.log(`⚠️ [FALLBACK] No matches found for team ${teamNumber} in event ${eventKey || 'null'}`);
+          continue;
+        }
+
+        console.log(`✅ [FALLBACK] Found ${matches.length} matches for team ${teamNumber}`);
+
+        const points = matches.map(m => parseFloat(m.calculated_points) || 0);
+        const matchCount = points.length;
+        const totalPoints = points.reduce((sum, p) => sum + p, 0);
+        const avgMatchScore = matchCount > 0 ? totalPoints / matchCount : 0;
+        
+        // Calculate std dev
+        const variance = matchCount > 0
+          ? points.reduce((sum, p) => sum + Math.pow(p - avgMatchScore, 2), 0) / matchCount
+          : 0;
+        const stdDevScore = Math.sqrt(variance);
+
+        const timestamps = matches.map(m => m.timestamp || 0).filter(t => t > 0);
+        const lastMatchTimestamp = timestamps.length > 0 ? Math.max(...timestamps) : 0;
+        const firstMatchTimestamp = timestamps.length > 0 ? Math.min(...timestamps) : 0;
+
+        statsMap.set(teamNumber, {
+          teamNumber,
+          eventKey: eventKey || null,
+          matchCount,
+          avgMatchScore: Math.round(avgMatchScore * 100) / 100,
+          stdDevScore: Math.round(stdDevScore * 100) / 100,
+          minScore: matchCount > 0 ? Math.min(...points) : 0,
+          maxScore: matchCount > 0 ? Math.max(...points) : 0,
+          totalPoints,
+          lastMatchTimestamp,
+          firstMatchTimestamp,
+        });
+
+        console.log(`✅ Fallback calculated stats for team ${teamNumber}:`, {
+          matchCount,
+          avgMatchScore: Math.round(avgMatchScore * 100) / 100,
+          eventKey: eventKey || null,
+        });
+      }
+
+      return statsMap;
+    } catch (error) {
+      console.error('Error in fallback calculation:', error);
       return new Map();
     }
   }

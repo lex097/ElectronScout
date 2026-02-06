@@ -140,6 +140,15 @@ export class SyncManager {
 
       if (success) {
         console.log(`✅ Match ${match.id} uploaded`);
+        // Refresh team_statistics view after successful upload
+        try {
+          const { teamStatisticsService } = await import('./teamStatisticsService');
+          await teamStatisticsService.refreshTeamStatistics();
+          console.log('✅ Refreshed team_statistics view after single match upload');
+        } catch (refreshError) {
+          console.error('Error refreshing team_statistics view:', refreshError);
+          // Don't fail the upload if refresh fails
+        }
       }
 
       return success;
@@ -225,6 +234,18 @@ export class SyncManager {
       // Mark skipped as synced
       for (const match of toSkip) {
         await db.markAsSynced(match.id);
+      }
+
+      // Refresh team_statistics materialized view after successful sync
+      if (successCount > 0) {
+        try {
+          const { teamStatisticsService } = await import('./teamStatisticsService');
+          await teamStatisticsService.refreshTeamStatistics();
+          console.log('✅ Refreshed team_statistics view after sync');
+        } catch (refreshError) {
+          console.error('Error refreshing team_statistics view:', refreshError);
+          // Don't fail the sync if refresh fails
+        }
       }
 
       return {

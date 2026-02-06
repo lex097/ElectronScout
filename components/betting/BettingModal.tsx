@@ -2,17 +2,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TBAMatch } from '../../api/types';
@@ -848,11 +848,37 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
         {parlayBets.length > 0 && (
           <View style={styles.parlaySummary}>
             <Text style={styles.parlaySummaryTitle}>Parlay Summary</Text>
-            {parlayBets.map((bet, index) => (
-              <Text key={index} style={styles.parlaySummaryItem}>
-                {bet.type}: {bet.odds.toFixed(2)}x
-              </Text>
-            ))}
+            {parlayBets.map((bet, index) => {
+              const formatBetType = (type: string): string => {
+                const typeMap: Record<string, string> = {
+                  winner: 'Winner',
+                  margin: 'Margin',
+                  over_under: 'Over/Under',
+                };
+                return typeMap[type] || type;
+              };
+              
+              const getBetDescription = (bet: { type: string; details: any }): string => {
+                switch (bet.type) {
+                  case 'winner':
+                    return `${bet.details?.alliance === 'red' ? 'Red' : 'Blue'} wins`;
+                  case 'margin':
+                    const alliance = bet.details?.alliance === 'red' ? 'Red' : 'Blue';
+                    return `${alliance} wins by ${bet.details?.margin}+ points`;
+                  case 'over_under':
+                    const overUnder = bet.details?.overUnder || bet.details?.over_under;
+                    return `Total ${overUnder === 'over' ? 'Over' : 'Under'} ${bet.details?.threshold}`;
+                  default:
+                    return '';
+                }
+              };
+              
+              return (
+                <Text key={index} style={styles.parlaySummaryItem}>
+                  {formatBetType(bet.type)}: {getBetDescription(bet)} ({bet.odds.toFixed(2)}x)
+                </Text>
+              );
+            })}
             <Text style={styles.parlaySummaryOdds}>
               Combined Odds: {parlayOdds.toFixed(2)}x
             </Text>

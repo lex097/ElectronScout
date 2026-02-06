@@ -31,7 +31,15 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "electronscout",
+          "organization": "aadis-organization"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
