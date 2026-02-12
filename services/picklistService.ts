@@ -1,7 +1,6 @@
 // services/picklistService.ts
-import { supabase as defaultSupabase } from '@/lib/supabase';
+import { edgeFunctions } from '@/lib/edgeFunctions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient } from '@supabase/supabase-js';
 
 // ============================================
 // PICKLIST SERVICE
@@ -17,20 +16,6 @@ const DB_TIMEOUT_MS = 5000;
 const OLD_STORAGE_KEY = 'picklists';
 
 export class PicklistService {
-  
-  // Get Supabase client - use service role key to bypass RLS
-  private getSupabaseClient() {
-    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.EXPO_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
-    
-    if (!serviceRoleKey) {
-      console.warn('No service role key found. Using anon key (may fail with RLS).');
-      return defaultSupabase;
-    }
-    
-    // Create client with service role key (bypasses RLS)
-    return createClient(supabaseUrl!, serviceRoleKey);
-  }
 
   /**
    * Fetch picklists from Supabase
@@ -38,6 +23,12 @@ export class PicklistService {
    */
   async fetchPicklistsFromSupabase(teamId: string, eventKey: string | null): Promise<Picklists | null> {
     try {
+      // Get team_number from teamId first
+      const teamNumber = await this.getTeamNumberFromTeamId(teamId);
+      if (!teamNumber) {
+        return null;
+      }
+
       // Create timeout promise
       const timeoutPromise = new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), DB_TIMEOUT_MS);
@@ -46,42 +37,8 @@ export class PicklistService {
       // Create fetch promise
       const fetchPromise = (async () => {
         try {
-          // Build query - now we only expect 1 row per team+event
-          let query = this.getSupabaseClient()
-            .from('picklists')
-            .select('team_rankings')
-            .eq('team_id', teamId);
-
-          // Add event_key filter (or IS NULL if eventKey is null)
-          if (eventKey) {
-            query = query.eq('event_key', eventKey);
-          } else {
-            query = query.is('event_key', null);
-          }
-
-          const { data, error } = await query.maybeSingle();
-
-          if (error) {
-            console.error('Error fetching picklists from Supabase:', error);
-            return null;
-          }
-
-          if (!data || !data.team_rankings) {
-            // No picklists found, return default empty structure
-            return {
-              firstPick: [],
-              secondPick: [],
-              doNotPick: [],
-            };
-          }
-
-          // team_rankings is now a JSON object with firstPick, secondPick, doNotPick
-          const rankings = data.team_rankings as any;
-          return {
-            firstPick: Array.isArray(rankings.firstPick) ? rankings.firstPick : [],
-            secondPick: Array.isArray(rankings.secondPick) ? rankings.secondPick : [],
-            doNotPick: Array.isArray(rankings.doNotPick) ? rankings.doNotPick : [],
-          };
+          const result = await edgeFunctions.fetchPicklists(teamNumber, eventKey);
+          return result.picklists;
         } catch (error) {
           console.error('Error in fetchPicklistsFromSupabase:', error);
           return null;
@@ -106,79 +63,13 @@ export class PicklistService {
     picklists: Picklists
   ): Promise<boolean> {
     try {
-      // Get profile ID for created_by field (only set on insert, not update)
-      const createdById = await this.getProfileIdByTeamId(teamId);
-
-      // Build the team_rankings JSON object
-      const teamRankingsJson = {
-        firstPick: picklists.firstPick,
-        secondPick: picklists.secondPick,
-        doNotPick: picklists.doNotPick,
-      };
-
-      // Build base query for finding existing record
-      let existingQuery = this.getSupabaseClient()
-        .from('picklists')
-        .select('id')
-        .eq('team_id', teamId);
-
-      if (eventKey) {
-        existingQuery = existingQuery.eq('event_key', eventKey);
-      } else {
-        existingQuery = existingQuery.is('event_key', null);
-      }
-
-      const { data: existing, error: selectError } = await existingQuery.maybeSingle();
-
-      if (selectError && selectError.code !== 'PGRST116') {
-        console.error('Error checking existing picklist:', selectError);
+      const teamNumber = await this.getTeamNumberFromTeamId(teamId);
+      if (!teamNumber) {
         return false;
       }
 
-      const updateData: any = {
-        team_rankings: teamRankingsJson,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (existing) {
-        // Update existing record
-        let updateQuery = this.getSupabaseClient()
-          .from('picklists')
-          .update(updateData)
-          .eq('team_id', teamId);
-
-        if (eventKey) {
-          updateQuery = updateQuery.eq('event_key', eventKey);
-        } else {
-          updateQuery = updateQuery.is('event_key', null);
-        }
-
-        const { error: updateError } = await updateQuery;
-
-        if (updateError) {
-          console.error('Error updating picklists:', updateError);
-          return false;
-        }
-      } else {
-        // Insert new record
-        const insertData: any = {
-          team_id: teamId,
-          event_key: eventKey,
-          team_rankings: teamRankingsJson,
-          created_by: createdById,
-        };
-
-        const { error: insertError } = await this.getSupabaseClient()
-          .from('picklists')
-          .insert(insertData);
-
-        if (insertError) {
-          console.error('Error inserting picklists:', insertError);
-          return false;
-        }
-      }
-
-      return true;
+      const result = await edgeFunctions.savePicklists(teamNumber, eventKey, picklists);
+      return result.success;
     } catch (error) {
       console.error('Error saving picklists to Supabase:', error);
       return false;
@@ -310,27 +201,8 @@ export class PicklistService {
         return null;
       }
 
-      const { data, error } = await this.getSupabaseClient()
-        .rpc('get_team_id_by_number', { team_num: teamNum });
-
-      if (error || !data) {
-        // Fallback: direct query if RPC doesn't work
-        const { data: teamData, error: queryError } = await this.getSupabaseClient()
-          .from('teams')
-          .select('id')
-          .eq('team_number', teamNum)
-          .single();
-
-        if (queryError) {
-          console.error('Failed to get team_id:', queryError);
-          return null;
-        }
-
-        return teamData?.id || null;
-      }
-
-      // RPC returns the UUID directly
-      return typeof data === 'string' ? data : null;
+      const result = await edgeFunctions.getTeamIdByNumber(teamNum);
+      return result.teamId;
     } catch (error) {
       console.error('Error getting team_id from team_number:', error);
       return null;
@@ -338,27 +210,14 @@ export class PicklistService {
   }
 
   /**
-   * Get profile ID for a team (for created_by field)
-   * Returns the first active profile for the team, or null if none exists
+   * Get team_number from teamId (using Edge Function)
    */
-  private async getProfileIdByTeamId(teamId: string): Promise<string | null> {
+  private async getTeamNumberFromTeamId(teamId: string): Promise<number | null> {
     try {
-      const { data, error } = await this.getSupabaseClient()
-        .from('profiles')
-        .select('id')
-        .eq('team_id', teamId)
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        // Silently fail - not having a profile is okay
-        return null;
-      }
-
-      return data?.id || null;
+      const result = await edgeFunctions.getTeamNumberByTeamId(teamId);
+      return result.teamNumber;
     } catch (error) {
-      // Silently fail - not having a profile is okay
+      console.error('Error getting team number from team ID:', error);
       return null;
     }
   }

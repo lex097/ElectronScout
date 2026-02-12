@@ -1,7 +1,7 @@
 // stores/ebucksStore.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { supabaseSyncService } from '../services/supabase.sync';
+import { supabase } from '@/lib/supabase';
 
 interface EbucksState {
   balance: number;
@@ -48,7 +48,6 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
       }
 
       // Try to load from database first
-      const supabase = supabaseSyncService.getClient();
       const { data, error } = await supabase
         .from('user_ebucks_balance')
         .select('balance')
@@ -128,8 +127,6 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
       const newBalance = currentBalance + amount;
 
       // Update database
-      const supabase = supabaseSyncService.getClient();
-      
       // Get current total_earned first
       const { data: currentData } = await supabase
         .from('user_ebucks_balance')
@@ -180,8 +177,6 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
       const newBalance = currentBalance - amount;
 
       // Update database
-      const supabase = supabaseSyncService.getClient();
-      
       // Get current total_spent first
       const { data: currentData } = await supabase
         .from('user_ebucks_balance')

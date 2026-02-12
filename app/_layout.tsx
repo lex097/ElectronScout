@@ -8,8 +8,10 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { UpdateAppModal } from '@/components/UpdateAppModal';
 import { useColorScheme } from '@/components/useColorScheme';
 import { queryClient } from '@/config/queryClient';
+import { useVersionCheck } from '@/hooks/useVersionCheck';
 import { useAuthStore } from '@/stores/authStore';
 import { useEbucksStore } from '@/stores/ebucksStore';
 import * as Sentry from '@sentry/react-native';
@@ -73,6 +75,7 @@ function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const { isAuthenticated, user, isLoading, checkAuth } = useAuthStore();
   const initializeEbucks = useEbucksStore((state) => state.initialize);
+  const { showModal, storeUrl, latestVersion, dismissModal } = useVersionCheck();
 
   useEffect(() => {
     checkAuth();
@@ -102,6 +105,12 @@ function RootLayoutNav() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <UpdateAppModal
+            visible={showModal}
+            storeUrl={storeUrl}
+            latestVersion={latestVersion}
+            onDismiss={dismissModal}
+          />
           <Stack screenOptions={{ headerShown: false, gestureEnabled: false }}>
           <Stack.Screen 
             name="login" 

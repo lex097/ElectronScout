@@ -3,17 +3,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Animated,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Animated,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bet, bettingService } from '../../services/bettingService';
-import { supabaseSyncService } from '../../services/supabase.sync';
+import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
 import { useEbucksStore } from '../../stores/ebucksStore';
 
@@ -81,7 +81,6 @@ export default function BettingHistoryScreen() {
         return;
       }
 
-      const supabase = supabaseSyncService.getClient();
       const { data, error } = await supabase
         .from('user_ebucks_balance')
         .select('scout_name, balance')
@@ -108,36 +107,27 @@ export default function BettingHistoryScreen() {
     }
   }, [user?.teamNumber]);
 
-  // Set up real-time subscription for leaderboard updates
+  // Set up real-time subscription for leaderboard updates (Broadcast — scalable, no Postgres Changes/WAL usage)
   useEffect(() => {
     if (activeTab !== 'leaderboard' || !user?.teamNumber) {
       return;
     }
 
-    const supabase = supabaseSyncService.getClient();
-    
-    // Subscribe to changes in user_ebucks_balance table for this team
-    const subscription = supabase
-      .channel('leaderboard-updates')
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
-          schema: 'public',
-          table: 'user_ebucks_balance',
-          filter: `team_number=eq.${user.teamNumber}`,
-        },
-        (payload) => {
-          // Refresh leaderboard when any balance changes
-          console.log('Leaderboard update detected:', payload.eventType);
-          loadLeaderboard();
-        }
-      )
+    const channelName = `leaderboard:${user.teamNumber}`;
+
+    const onLeaderboardChange = () => {
+      loadLeaderboard();
+    };
+
+    const channel = supabase
+      .channel(channelName)
+      .on('broadcast', { event: 'INSERT' }, onLeaderboardChange)
+      .on('broadcast', { event: 'UPDATE' }, onLeaderboardChange)
+      .on('broadcast', { event: 'DELETE' }, onLeaderboardChange)
       .subscribe();
 
-    subscriptionRef.current = subscription;
+    subscriptionRef.current = channel;
 
-    // Cleanup subscription on unmount or tab change
     return () => {
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current);

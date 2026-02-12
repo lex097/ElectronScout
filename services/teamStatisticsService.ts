@@ -1,6 +1,7 @@
 // services/teamStatisticsService.ts
 import { getTeamYearEPABatch } from '../api/services/statbotics';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
+import { supabase } from '@/lib/supabase';
 import { supabaseSyncService } from './supabase.sync';
 
 export interface TeamStatistics {
@@ -45,8 +46,6 @@ class TeamStatisticsService {
     eventKey?: string
   ): Promise<TeamStatistics | null> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       let query = supabase
         .from('team_statistics')
         .select('*')
@@ -94,8 +93,6 @@ class TeamStatisticsService {
       if (teamNumbers.length === 0) {
         return new Map();
       }
-
-      const supabase = supabaseSyncService.getClient();
       
       let query = supabase
         .from('team_statistics')
@@ -443,7 +440,6 @@ class TeamStatisticsService {
   ): Promise<Map<number, TeamStatistics>> {
     try {
       console.log(`🔍 [FALLBACK] Starting fallback calculation for ${teamNumbers.length} teams, event: ${eventKey || 'null'}`);
-      const supabase = supabaseSyncService.getClient();
       const statsMap = new Map<number, TeamStatistics>();
 
       // Query matches directly for each team
@@ -522,8 +518,6 @@ class TeamStatisticsService {
     eventKey: string
   ): Promise<Map<number, TeamStatistics>> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       const { data, error } = await supabase
         .from('team_statistics')
         .select('*')
@@ -561,8 +555,6 @@ class TeamStatisticsService {
    */
   async getLeagueAverage(eventKey: string): Promise<LeagueAverage | null> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       const { data, error } = await supabase
         .from('league_averages')
         .select('*')
@@ -608,8 +600,6 @@ class TeamStatisticsService {
       }
 
       // Fetch match metrics to calculate phase averages
-      const supabase = supabaseSyncService.getClient();
-      
       let query = supabase
         .from('matches')
         .select('metrics, calculated_points, id')
@@ -749,7 +739,6 @@ class TeamStatisticsService {
       }
 
       // Fetch all matches for all teams in the event
-      const supabase = supabaseSyncService.getClient();
       const teamNumbers = Array.from(statsMap.keys());
       
       let query = supabase
@@ -847,8 +836,6 @@ class TeamStatisticsService {
    */
   async refreshTeamStatistics(): Promise<boolean> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       const { error } = await supabase.rpc('refresh_team_statistics');
 
       if (error) {
@@ -868,8 +855,6 @@ class TeamStatisticsService {
    */
   async updateLeagueAverage(eventKey: string): Promise<boolean> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       const { error } = await supabase.rpc('update_league_average', {
         event_key_param: eventKey,
       });

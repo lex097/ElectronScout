@@ -279,7 +279,26 @@ export default function MatchScoutScreen() {
     router.push('/select-event' as any);
   };
 
+  const resetMatchAndTimerState = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    matchStartedRef.current = false;
+    autonomousTimeRemainingRef.current = null;
+    autonomousTimerCompletedRef.current = false;
+    hasAutoSwitchedRef.current = false;
+    setMatchStarted(false);
+    setAutonomousTimeRemaining(null);
+    setAutonomousTimerCompleted(false);
+    setShowCountdownToast(false);
+  }, []);
+
   const startMatch = useCallback(() => {
+    if (!matchNumber?.trim() || !teamNumber?.trim()) {
+      Alert.alert('Select a match', 'Please select a match and team before starting.');
+      return;
+    }
     // Only start if timer hasn't been completed yet
     if (!matchStartedRef.current && !autonomousTimerCompletedRef.current && isAutonomousPhase) {
       console.log('[Timer] Starting match - Autonomous duration:', autonomousDuration);
@@ -296,7 +315,7 @@ export default function MatchScoutScreen() {
         timerIntervalRef.current = null;
       }
     }
-  }, [isAutonomousPhase, autonomousDuration]);
+  }, [isAutonomousPhase, autonomousDuration, matchNumber, teamNumber]);
 
   const updateMetric = (metricId: string, value: any) => {
     // Start match if user starts scoring in autonomous phase (only if timer hasn't completed)
@@ -584,6 +603,8 @@ export default function MatchScoutScreen() {
           {
             text: 'New Match',
             onPress: async () => {
+              // If timer was running (e.g. still in autonomous), reset match and timer state
+              resetMatchAndTimerState();
               if (isTBAMode) {
                 // In TBA mode, go back to match selection
                 const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);

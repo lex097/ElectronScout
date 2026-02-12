@@ -2,8 +2,6 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { format } from 'date-fns';
-import { createClient } from '@supabase/supabase-js';
-import { supabase as defaultSupabase } from '@/lib/supabase';
 import { supabaseSyncService } from './supabase.sync';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 
@@ -19,24 +17,6 @@ interface ExportMatch {
 }
 
 export class ExportService {
-  /**
-   * Get Supabase client - use service role key to bypass RLS
-   */
-  private getSupabaseClient() {
-    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.EXPO_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;
-    
-    if (!serviceRoleKey) {
-      console.warn('No service role key found. Using anon key (may fail with RLS).');
-      // Fallback to regular client if service role key not available
-      return defaultSupabase;
-    }
-    
-    // Create client with service role key (bypasses RLS)
-    return createClient(supabaseUrl!, serviceRoleKey);
-  }
-
-
   /**
    * Escape CSV value (handle commas, quotes, newlines)
    */

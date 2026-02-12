@@ -2,7 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
-import { supabaseSyncService } from './supabase.sync';
+import { supabase } from '@/lib/supabase';
 import { LeagueAverage, teamStatisticsService } from './teamStatisticsService';
 
 export interface BetData {
@@ -592,8 +592,6 @@ class BettingService {
         throw new Error('No user identifier');
       }
 
-      const supabase = supabaseSyncService.getClient();
-
       // Insert bet
       const { data, error } = await supabase
         .from('bets')
@@ -629,8 +627,6 @@ class BettingService {
    */
   async resolveBet(betId: string, won: boolean, payout: number): Promise<boolean> {
     try {
-      const supabase = supabaseSyncService.getClient();
-
       const { error } = await supabase
         .from('bets')
         .update({
@@ -689,8 +685,6 @@ class BettingService {
       if (!userIdentifier) {
         return [];
       }
-
-      const supabase = supabaseSyncService.getClient();
       
       let query = supabase
         .from('bets')
@@ -736,8 +730,6 @@ class BettingService {
    */
   async getMatchBets(matchKey: string): Promise<Bet[]> {
     try {
-      const supabase = supabaseSyncService.getClient();
-      
       const { data, error } = await supabase
         .from('bets')
         .select('*')
@@ -801,7 +793,6 @@ class BettingService {
       }
 
       // Get all pending bets for this match
-      const supabase = supabaseSyncService.getClient();
       const { data: bets, error } = await supabase
         .from('bets')
         .select('*')

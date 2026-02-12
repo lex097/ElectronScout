@@ -30,6 +30,9 @@ export default {
     ios: {
       bundleIdentifier: "com.valencerobotics.electronscout",
       supportsTablet: true,
+      infoPlist: {
+        LSApplicationQueriesSchemes: ["itms-apps"],
+      },
       "icon": {
         "dark": "./assets/ios-icons/ios-dark.png",
         "light": "./assets/ios-icons/ios-light.png",
