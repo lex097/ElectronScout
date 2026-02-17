@@ -18,6 +18,7 @@ const SELECTED_EVENT_KEY = 'selected_event_key';
 const SELECTED_EVENT_NAME_KEY = 'selected_event_name';
 const SELECTED_MATCH_KEY = 'selected_match_key';
 const SELECTED_MATCH_NUMBER_KEY = 'selected_match_number';
+const SELECTED_TEAM_NUMBER_KEY = 'selected_team_number';
 
 export default function MatchScoutScreen() {
   const params = useLocalSearchParams<{
@@ -44,6 +45,7 @@ export default function MatchScoutScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const prevMatchNumberRef = useRef<string>('');
   const prevTeamNumberRef = useRef<string>('');
+  const loadedSelectionRef = useRef<{ matchNumber: string; teamNumber: string } | null>(null);
   const matchStartedRef = useRef<boolean>(false);
   const autonomousTimeRemainingRef = useRef<number | null>(null);
   const autonomousTimerCompletedRef = useRef<boolean>(false);
@@ -93,8 +95,16 @@ export default function MatchScoutScreen() {
         }
 
         const matchNum = await AsyncStorage.getItem(SELECTED_MATCH_NUMBER_KEY);
+        const teamNum = await AsyncStorage.getItem(SELECTED_TEAM_NUMBER_KEY);
         if (matchNum) {
           setSelectedMatchNumber(matchNum);
+          setMatchNumber(matchNum);
+        }
+        if (teamNum) {
+          setTeamNumber(teamNum);
+        }
+        if (matchNum && teamNum) {
+          loadedSelectionRef.current = { matchNumber: matchNum, teamNumber: teamNum };
         }
       } catch (error) {
         console.error('Error loading preferences:', error);
@@ -113,7 +123,17 @@ export default function MatchScoutScreen() {
           setSelectedEventName(eventName);
 
           const matchNum = await AsyncStorage.getItem(SELECTED_MATCH_NUMBER_KEY);
-          setSelectedMatchNumber(matchNum);
+          const teamNum = await AsyncStorage.getItem(SELECTED_TEAM_NUMBER_KEY);
+          if (matchNum) {
+            setSelectedMatchNumber(matchNum);
+            setMatchNumber(matchNum);
+          }
+          if (teamNum) {
+            setTeamNumber(teamNum);
+          }
+          if (matchNum && teamNum) {
+            loadedSelectionRef.current = { matchNumber: matchNum, teamNumber: teamNum };
+          }
         } catch (error) {
           console.error('Error reloading preferences:', error);
         }
@@ -128,6 +148,7 @@ export default function MatchScoutScreen() {
     if (params.fromTBA === 'true' && params.matchNumber && params.teamNumber) {
       const newMatchNumber = params.matchNumber;
       const newTeamNumber = params.teamNumber;
+      loadedSelectionRef.current = { matchNumber: newMatchNumber, teamNumber: newTeamNumber };
       
       // Only update if values actually changed
       if (newMatchNumber !== matchNumber) {
@@ -295,7 +316,9 @@ export default function MatchScoutScreen() {
   }, []);
 
   const startMatch = useCallback(() => {
-    if (!matchNumber?.trim() || !teamNumber?.trim()) {
+    const match = matchNumber?.trim() || loadedSelectionRef.current?.matchNumber || '';
+    const team = teamNumber?.trim() || loadedSelectionRef.current?.teamNumber || '';
+    if (!match || !team) {
       Alert.alert('Select a match', 'Please select a match and team before starting.');
       return;
     }

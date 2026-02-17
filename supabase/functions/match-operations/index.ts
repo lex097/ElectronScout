@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { initSentry, captureError } from "../_shared/sentry.ts";
+import { captureError, initSentry } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -268,15 +268,22 @@ Deno.serve(async (req) => {
         }
 
         const { matchNumber, teamNumber: teamNumberScouted } = params;
-        const { data, error } = await supabase
-          .from('matches')
-          .select('id')
-          .eq('team_id', teamId)
-          .eq('match_number', matchNumber)
-          .eq('team_number', teamNumberScouted)
-          .limit(1);
+        const [{ data: matchesData, error }, { data: deletionsData }] = await Promise.all([
+          supabase
+            .from('matches')
+            .select('id')
+            .eq('team_id', teamId)
+            .eq('match_number', matchNumber)
+            .eq('team_number', teamNumberScouted)
+            .limit(1),
+          supabase.from('match_deletions').select('match_id').eq('team_id', teamId),
+        ]);
 
-        result = { exists: !error && (data?.length || 0) > 0 };
+        const deletedIds = new Set((deletionsData || []).map((d) => String(d.match_id)));
+        const exists = !error && (matchesData?.length || 0) > 0;
+        const notDeleted = exists && !matchesData?.some((m) => deletedIds.has(String(m.id)));
+
+        result = { exists: notDeleted };
         break;
       }
 

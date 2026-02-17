@@ -1,7 +1,7 @@
 // stores/ebucksStore.ts
+import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { supabase } from '@/lib/supabase';
 
 interface EbucksState {
   balance: number;
@@ -126,24 +126,11 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
       const currentBalance = get().balance;
       const newBalance = currentBalance + amount;
 
-      // Update database
-      // Get current total_earned first
-      const { data: currentData } = await supabase
-        .from('user_ebucks_balance')
-        .select('total_earned')
-        .eq('user_identifier', userIdentifier)
-        .single();
-      
-      const newTotalEarned = (currentData?.total_earned || 0) + amount;
-      
-      const { error } = await supabase
-        .from('user_ebucks_balance')
-        .update({
-          balance: newBalance,
-          total_earned: newTotalEarned,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_identifier', userIdentifier);
+      // Single RPC call (was: 1 SELECT + 1 UPDATE)
+      const { error } = await supabase.rpc('increment_earned_ebucks', {
+        p_user_identifier: userIdentifier,
+        p_amount: amount,
+      });
 
       if (error) {
         console.error('Error updating balance in database:', error);
@@ -176,28 +163,19 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
 
       const newBalance = currentBalance - amount;
 
-      // Update database
-      // Get current total_spent first
-      const { data: currentData } = await supabase
-        .from('user_ebucks_balance')
-        .select('total_spent')
-        .eq('user_identifier', userIdentifier)
-        .single();
-      
-      const newTotalSpent = (currentData?.total_spent || 0) + amount;
-      
-      const { error } = await supabase
-        .from('user_ebucks_balance')
-        .update({
-          balance: newBalance,
-          total_spent: newTotalSpent,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_identifier', userIdentifier);
+      // Single RPC call: atomic spend with balance check (was: 1 SELECT + 1 UPDATE)
+      const { data: success, error } = await supabase.rpc('spend_ebucks_if_sufficient', {
+        p_user_identifier: userIdentifier,
+        p_amount: amount,
+      });
 
       if (error) {
-        console.error('Error updating balance in database:', error);
+        console.error('Error spending ebucks:', error);
         return false;
+      }
+
+      if (!success) {
+        return false; // Insufficient balance in DB (race condition)
       }
 
       // Update AsyncStorage

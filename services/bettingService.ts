@@ -1,8 +1,8 @@
 // services/bettingService.ts
+import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
-import { supabase } from '@/lib/supabase';
 import { LeagueAverage, teamStatisticsService } from './teamStatisticsService';
 
 export interface BetData {
@@ -818,7 +818,9 @@ class BettingService {
       
       console.log(`[Betting] Match ${matchKey} results: Red ${redScore} - Blue ${blueScore}, Winner: ${winningAlliance}`);
 
-      // Resolve each bet
+      // Compute all bet outcomes in memory (no DB calls)
+      const resolutions: Array<{ id: string; status: 'won' | 'lost'; payout: number; user_identifier: string }> = [];
+
       for (const bet of bets) {
         let won = false;
         let payout = 0;
@@ -988,9 +990,23 @@ class BettingService {
             break;
         }
 
-        // Resolve the bet
-        console.log(`[Betting] Resolving bet ${bet.id}: ${won ? 'WON' : 'LOST'}, payout: ${payout}`);
-        await this.resolveBet(bet.id, won, payout);
+        resolutions.push({
+          id: bet.id,
+          status: won ? 'won' : 'lost',
+          payout,
+          user_identifier: bet.user_identifier,
+        });
+        console.log(`[Betting] Resolved bet ${bet.id}: ${won ? 'WON' : 'LOST'}, payout: ${payout}`);
+      }
+
+      // Batch resolve all bets in one RPC call (eliminates N+1)
+      if (resolutions.length > 0) {
+        const { error } = await supabase.rpc('resolve_bets_batch', {
+          resolutions,
+        });
+        if (error) {
+          console.error('[Betting] Error batch resolving bets:', error);
+        }
       }
     } catch (error) {
       console.error('Error checking and resolving bets:', error);

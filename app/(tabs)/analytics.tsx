@@ -53,13 +53,16 @@ export default function AnalyticsScreen() {
         // Load from local database
         // Note: Local database doesn't store event_key, so we can't filter by event
         const allMatches = await db.getAllMatches();
-        setMatches(allMatches);
+        // Exclude admin-deleted matches (fetched from Supabase match_deletions)
+        const deletedIds = await supabaseSyncService.getDeletedMatchIds();
+        const filteredMatches = allMatches.filter((m) => !deletedIds.has(m.id));
+        setMatches(filteredMatches);
         
         // Calculate analytics using existing service (manual calculation)
-        if (allMatches.length > 0) {
-          const analytics = analyticsService.calculateTeamAnalytics(allMatches);
+        if (filteredMatches.length > 0) {
+          const analytics = analyticsService.calculateTeamAnalytics(filteredMatches);
           setTeamAnalytics(analytics);
-      } else {
+        } else {
           setTeamAnalytics(new Map());
         }
       } else {

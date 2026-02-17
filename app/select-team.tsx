@@ -1,5 +1,6 @@
 // app/select-team.tsx - Team Selection Screen
 import { useEventMatches } from '@/hooks/useEventMatches';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -52,13 +53,16 @@ export default function SelectTeamScreen() {
     return matches.find((m) => m.key === matchKey);
   }, [matches, matchKey]);
 
-  const handleSelectTeam = (teamNumber: number) => {
-    // Navigate back to match scouting screen with pre-filled data
-    router.push({
+  const handleSelectTeam = async (teamNumber: number) => {
+    const teamNumStr = teamNumber.toString();
+    // Persist selection so index screen can load it even if params don't pass through
+    await AsyncStorage.setItem('selected_team_number', teamNumStr);
+    // Navigate back to match scouting screen (replace to avoid stacking; AsyncStorage ensures data loads)
+    router.replace({
       pathname: '/(tabs)' as any,
       params: {
         matchNumber,
-        teamNumber: teamNumber.toString(),
+        teamNumber: teamNumStr,
         fromTBA: 'true',
       },
     });

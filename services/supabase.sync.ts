@@ -1,5 +1,6 @@
 // services/supabase.sync.ts
 import { edgeFunctions } from '@/lib/edgeFunctions';
+import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ============================================
@@ -116,15 +117,6 @@ export class SupabaseSyncService {
   }
 
   /**
-   * Check which match IDs have been admin-deleted (tombstoned) for this team.
-   * Note: This is now handled by Edge Functions, but kept for compatibility
-   */
-  private async getDeletedMatchIds(teamId: string, matchIds: string[]): Promise<Set<string>> {
-    // Edge Functions handle deletion filtering internally
-    return new Set();
-  }
-
-  /**
    * Insert a single match
    */
   async insertMatch(match: {
@@ -225,6 +217,27 @@ export class SupabaseSyncService {
     } catch (error) {
       console.error('Update failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Get set of match IDs that have been admin-deleted for the current team.
+   * Used to exclude deleted matches from local analytics and other calculations.
+   */
+  async getDeletedMatchIds(): Promise<Set<string>> {
+    try {
+      const teamId = await this.getTeamId();
+      if (!teamId) return new Set();
+
+      const { data } = await supabase
+        .from('match_deletions')
+        .select('match_id')
+        .eq('team_id', teamId);
+
+      return new Set((data || []).map((d: { match_id: string }) => String(d.match_id)));
+    } catch (error) {
+      console.error('Failed to fetch deleted match IDs:', error);
+      return new Set();
     }
   }
 

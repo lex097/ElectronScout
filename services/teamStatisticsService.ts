@@ -1,7 +1,7 @@
 // services/teamStatisticsService.ts
+import { supabase } from '@/lib/supabase';
 import { getTeamYearEPABatch } from '../api/services/statbotics';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
-import { supabase } from '@/lib/supabase';
 import { supabaseSyncService } from './supabase.sync';
 
 export interface TeamStatistics {
@@ -40,15 +40,23 @@ export interface TeamAverageWithPhases extends TeamStatistics {
 class TeamStatisticsService {
   /**
    * Get team statistics from materialized view for a single team
+   * Only returns data scouted by the current team (team_id filter)
    */
   async getTeamStatistics(
     teamNumber: number,
     eventKey?: string
   ): Promise<TeamStatistics | null> {
     try {
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        console.warn('No team context for team statistics');
+        return null;
+      }
+
       let query = supabase
         .from('team_statistics')
         .select('*')
+        .eq('team_id', teamId)
         .eq('team_number', teamNumber);
 
       if (eventKey) {
@@ -93,10 +101,17 @@ class TeamStatisticsService {
       if (teamNumbers.length === 0) {
         return new Map();
       }
+
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        console.warn('No team context for team statistics batch');
+        return new Map();
+      }
       
       let query = supabase
         .from('team_statistics')
         .select('*')
+        .eq('team_id', teamId)
         .in('team_number', teamNumbers);
 
       if (eventKey) {
@@ -118,7 +133,7 @@ class TeamStatisticsService {
       if (error) {
         console.error('Error querying team_statistics:', error);
         // Fallback: try to calculate from raw matches if view fails
-        return await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+        return await this.fallbackCalculateFromMatches(teamId, teamNumbers, eventKey);
       }
 
       if (!data || data.length === 0) {
@@ -126,7 +141,7 @@ class TeamStatisticsService {
         console.log(`🔍 [FALLBACK] Querying teams: ${teamNumbers.length} teams for event ${eventKey || 'null'}`);
         
         // Fallback: calculate from raw matches, then add EPA for teams with no/low data
-        const fallbackStats = await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+        const fallbackStats = await this.fallbackCalculateFromMatches(teamId, teamNumbers, eventKey);
         
         console.log(`🔍 [FALLBACK] Fallback returned ${fallbackStats.size} teams with data`);
         console.log(`🔍 [FALLBACK] Teams in fallback result:`, Array.from(fallbackStats.keys()));
@@ -383,7 +398,10 @@ class TeamStatisticsService {
     } catch (error) {
       console.error('Error fetching team statistics batch:', error);
       // Fallback: try to calculate from raw matches, then add EPA
-      const fallbackStats = await this.fallbackCalculateFromMatches(teamNumbers, eventKey);
+      const teamId = await supabaseSyncService.getTeamId();
+      const fallbackStats = teamId
+        ? await this.fallbackCalculateFromMatches(teamId, teamNumbers, eventKey)
+        : new Map();
       
       // Check which teams still have no data and fetch EPA for them
       const teamsStillMissing = teamNumbers.filter(tn => !fallbackStats.has(tn));
@@ -433,54 +451,80 @@ class TeamStatisticsService {
 
   /**
    * Fallback: Calculate statistics directly from matches table if view is empty
+   * Only uses matches scouted by the specified team (team_id filter)
    */
   private async fallbackCalculateFromMatches(
+    teamId: string,
     teamNumbers: number[],
     eventKey?: string
   ): Promise<Map<number, TeamStatistics>> {
     try {
-      console.log(`🔍 [FALLBACK] Starting fallback calculation for ${teamNumbers.length} teams, event: ${eventKey || 'null'}`);
+      console.log(`🔍 [FALLBACK] Starting fallback calculation for ${teamNumbers.length} teams, event: ${eventKey || 'null'}, team_id: ${teamId}`);
       const statsMap = new Map<number, TeamStatistics>();
 
-      // Query matches directly for each team
-      for (const teamNumber of teamNumbers) {
-        let query = supabase
-          .from('matches')
-          .select('calculated_points, timestamp')
-          .eq('team_number', teamNumber);
+      if (teamNumbers.length === 0) {
+        return statsMap;
+      }
 
-        if (eventKey) {
-          query = query.eq('event_key', eventKey);
-        } else {
-          query = query.is('event_key', null);
+      // Single batch query for all teams (eliminates N+1) - only current team's scouted data
+      let query = supabase
+        .from('matches')
+        .select('team_number, calculated_points, timestamp')
+        .eq('team_id', teamId)
+        .in('team_number', teamNumbers);
+
+      if (eventKey) {
+        query = query.eq('event_key', eventKey);
+      } else {
+        query = query.is('event_key', null);
+      }
+
+      const { data: allMatches, error } = await query;
+
+      if (error) {
+        console.log(`⚠️ [FALLBACK] Error querying matches:`, error.message);
+        return statsMap;
+      }
+
+      if (!allMatches || allMatches.length === 0) {
+        console.log(`⚠️ [FALLBACK] No matches found for teamNumbers in event ${eventKey || 'null'}`);
+        return statsMap;
+      }
+
+      // Exclude admin-deleted matches
+      const matchIds = allMatches.map((m: any) => m.id);
+      const { data: deletedData } = await supabase
+        .from('match_deletions')
+        .select('match_id')
+        .in('match_id', matchIds);
+      const deletedIds = new Set((deletedData || []).map((d: any) => d.match_id));
+      const matches = allMatches.filter((m: any) => !deletedIds.has(m.id));
+
+      // Group matches by team_number in memory
+      const matchesByTeam = new Map<number, Array<{ calculated_points: number; timestamp: number }>>();
+      for (const m of matches) {
+        const teamNumber = m.team_number;
+        const points = parseFloat(m.calculated_points) || 0;
+        const timestamp = m.timestamp || 0;
+        if (!matchesByTeam.has(teamNumber)) {
+          matchesByTeam.set(teamNumber, []);
         }
+        matchesByTeam.get(teamNumber)!.push({ calculated_points: points, timestamp });
+      }
 
-        const { data: matches, error } = await query;
-
-        if (error) {
-          console.log(`⚠️ [FALLBACK] Error querying matches for team ${teamNumber}:`, error.message);
-          continue;
-        }
-
-        if (!matches || matches.length === 0) {
-          console.log(`⚠️ [FALLBACK] No matches found for team ${teamNumber} in event ${eventKey || 'null'}`);
-          continue;
-        }
-
-        console.log(`✅ [FALLBACK] Found ${matches.length} matches for team ${teamNumber}`);
-
-        const points = matches.map(m => parseFloat(m.calculated_points) || 0);
+      // Calculate stats for each team
+      for (const [teamNumber, matches] of matchesByTeam) {
+        const points = matches.map(m => m.calculated_points);
         const matchCount = points.length;
         const totalPoints = points.reduce((sum, p) => sum + p, 0);
         const avgMatchScore = matchCount > 0 ? totalPoints / matchCount : 0;
         
-        // Calculate std dev
         const variance = matchCount > 0
           ? points.reduce((sum, p) => sum + Math.pow(p - avgMatchScore, 2), 0) / matchCount
           : 0;
         const stdDevScore = Math.sqrt(variance);
 
-        const timestamps = matches.map(m => m.timestamp || 0).filter(t => t > 0);
+        const timestamps = matches.map(m => m.timestamp).filter(t => t > 0);
         const lastMatchTimestamp = timestamps.length > 0 ? Math.max(...timestamps) : 0;
         const firstMatchTimestamp = timestamps.length > 0 ? Math.min(...timestamps) : 0;
 
@@ -512,15 +556,21 @@ class TeamStatisticsService {
   }
 
   /**
-   * Get all team statistics for an event
+   * Get all team statistics for an event (only current team's scouted data)
    */
   async getAllTeamStatisticsForEvent(
     eventKey: string
   ): Promise<Map<number, TeamStatistics>> {
     try {
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        return new Map();
+      }
+
       const { data, error } = await supabase
         .from('team_statistics')
         .select('*')
+        .eq('team_id', teamId)
         .eq('event_key', eventKey);
 
       if (error || !data) {
@@ -551,13 +601,19 @@ class TeamStatisticsService {
   }
 
   /**
-   * Get league average for an event
+   * Get league average for an event (only current team's scouted data)
    */
   async getLeagueAverage(eventKey: string): Promise<LeagueAverage | null> {
     try {
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        return null;
+      }
+
       const { data, error } = await supabase
         .from('league_averages')
         .select('*')
+        .eq('team_id', teamId)
         .eq('event_key', eventKey)
         .single();
 
@@ -599,10 +655,16 @@ class TeamStatisticsService {
         return null;
       }
 
-      // Fetch match metrics to calculate phase averages
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        return null;
+      }
+
+      // Fetch match metrics to calculate phase averages (only current team's scouted data)
       let query = supabase
         .from('matches')
         .select('metrics, calculated_points, id')
+        .eq('team_id', teamId)
         .eq('team_number', teamNumber);
 
       if (eventKey) {
@@ -611,15 +673,17 @@ class TeamStatisticsService {
         query = query.is('event_key', null);
       }
 
-      // Exclude admin-deleted matches
-      const { data: deletedMatchIdsData } = await supabase
-        .from('match_deletions')
-        .select('match_id')
-        .eq('team_id', await supabaseSyncService.getTeamId());
-
-      const deletedMatchIds = new Set((deletedMatchIdsData || []).map(d => d.match_id));
-
       const { data: matches, error } = await query;
+
+      // Exclude admin-deleted matches
+      const matchIds = (matches || []).map((m: any) => m.id);
+      const { data: deletedMatchIdsData } = matchIds.length > 0
+        ? await supabase
+            .from('match_deletions')
+            .select('match_id')
+            .in('match_id', matchIds)
+        : { data: [] };
+      const deletedMatchIds = new Set((deletedMatchIdsData || []).map((d: any) => d.match_id));
 
       if (error || !matches || matches.length === 0) {
         return {
@@ -731,31 +795,37 @@ class TeamStatisticsService {
     eventKey: string
   ): Promise<Map<number, TeamAverageWithPhases>> {
     try {
-      // Get all team statistics for the event
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        return new Map();
+      }
+
+      // Get all team statistics for the event (only current team's data)
       const statsMap = await this.getAllTeamStatisticsForEvent(eventKey);
       
       if (statsMap.size === 0) {
         return new Map();
       }
 
-      // Fetch all matches for all teams in the event
+      // Fetch all matches for all teams in the event (only current team's scouted data)
       const teamNumbers = Array.from(statsMap.keys());
       
-      let query = supabase
+      const { data: matches, error } = await supabase
         .from('matches')
         .select('team_number, metrics, calculated_points, id')
+        .eq('team_id', teamId)
         .eq('event_key', eventKey)
         .in('team_number', teamNumbers);
 
       // Exclude admin-deleted matches
-      const { data: deletedMatchIdsData } = await supabase
-        .from('match_deletions')
-        .select('match_id')
-        .eq('team_id', await supabaseSyncService.getTeamId());
-
-      const deletedMatchIds = new Set((deletedMatchIdsData || []).map(d => d.match_id));
-
-      const { data: matches, error } = await query;
+      const matchIds = (matches || []).map((m: any) => m.id);
+      const { data: deletedMatchIdsData } = matchIds.length > 0
+        ? await supabase
+            .from('match_deletions')
+            .select('match_id')
+            .in('match_id', matchIds)
+        : { data: [] };
+      const deletedMatchIds = new Set((deletedMatchIdsData || []).map((d: any) => d.match_id));
 
       if (error) {
         console.error('Error fetching matches for phase calculation:', error);
@@ -851,11 +921,18 @@ class TeamStatisticsService {
   }
 
   /**
-   * Update league average for an event
+   * Update league average for an event (uses only current team's scouted data)
    */
   async updateLeagueAverage(eventKey: string): Promise<boolean> {
     try {
+      const teamId = await supabaseSyncService.getTeamId();
+      if (!teamId) {
+        console.warn('No team context for updating league average');
+        return false;
+      }
+
       const { error } = await supabase.rpc('update_league_average', {
+        team_id_param: teamId,
         event_key_param: eventKey,
       });
 
