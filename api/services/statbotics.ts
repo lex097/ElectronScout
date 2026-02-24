@@ -1,6 +1,13 @@
 // api/services/statbotics.ts - Statbotics API service functions
 import statboticsClient from '../statboticsClient';
 
+const EPA_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes max
+
+// In-memory cache keyed by year + sorted team numbers.
+// Same match (same 6 teams) = cache hit = instant when reopening modal.
+// New match (different teams) = cache miss = fresh fetch.
+const epaCache = new Map<string, { data: Map<number, StatboticsTeamYear>; fetchedAt: number }>();
+
 /**
  * Statbotics Team Year data structure
  * Based on Statbotics API v3 documentation
@@ -11,7 +18,8 @@ export interface StatboticsTeamYear {
   year: number;
   epa: {
     total_points: {
-      mean: number; // This is the EPA we want
+      mean: number; // EPA mean
+      sd?: number; // Standard deviation for normal distribution odds
       [key: string]: any;
     };
     [key: string]: any;
@@ -30,27 +38,15 @@ export async function getTeamYearEPA(
   year: number
 ): Promise<StatboticsTeamYear | null> {
   try {
-    console.log(`📡 [STATBOTICS API] Calling API for team ${teamNumber}, year ${year}`);
-    console.log(`📡 [STATBOTICS API] Endpoint: /team_year/${teamNumber}/${year}`);
-    
     const response = await statboticsClient.get<StatboticsTeamYear>(
       `/team_year/${teamNumber}/${year}`
     );
-    
-    console.log(`✅ [STATBOTICS API] Success for team ${teamNumber}:`, {
-      status: response.status,
-      hasData: !!response.data,
-      epaValue: response.data?.epa?.total_points?.mean || 'N/A',
-    });
-    
     return response.data;
   } catch (error: any) {
-    // Statbotics returns 404 if team/year doesn't exist
     if (error.response?.status === 404) {
-      console.log(`⚠️ [STATBOTICS API] 404 - No data found for team ${teamNumber} in year ${year}`);
       return null;
     }
-    console.error(`❌ [STATBOTICS API] Error fetching EPA for team ${teamNumber} year ${year}:`, {
+    console.error(`[Statbotics] Error fetching EPA for team ${teamNumber}:`, {
       status: error.response?.status,
       statusText: error.response?.statusText,
       message: error.message,
@@ -61,39 +57,32 @@ export async function getTeamYearEPA(
 }
 
 /**
- * Fetch team EPA for multiple teams in a specific year
- * @param teamNumbers - Array of team numbers
- * @param year - The year
- * @returns Promise resolving to Map of team number to StatboticsTeamYear
+ * Fetch team EPA for multiple teams in a specific year.
+ * In-memory cache keyed by match teams: fresh fetch for new match, instant for repeated modal opens.
  */
 export async function getTeamYearEPABatch(
   teamNumbers: number[],
   year: number
 ): Promise<Map<number, StatboticsTeamYear>> {
-  console.log(`📡 [STATBOTICS API] Batch fetch starting for ${teamNumbers.length} teams (year ${year}):`, teamNumbers);
-  
-  const epaMap = new Map<number, StatboticsTeamYear>();
-  
-  // Statbotics doesn't have a batch endpoint, so we fetch individually
-  // Use Promise.allSettled to handle failures gracefully
-  const promises = teamNumbers.map(async (teamNumber) => {
-    console.log(`📡 [STATBOTICS API] Fetching EPA for team ${teamNumber}...`);
-    const epa = await getTeamYearEPA(teamNumber, year);
-    if (epa) {
-      epaMap.set(teamNumber, epa);
-      console.log(`✅ [STATBOTICS API] Team ${teamNumber} EPA added to map`);
-    } else {
-      console.log(`⚠️ [STATBOTICS API] Team ${teamNumber} EPA not found or failed`);
-    }
-  });
+  const cacheKey = `${year}:${[...teamNumbers].sort((a, b) => a - b).join(',')}`;
+  const now = Date.now();
+  const cached = epaCache.get(cacheKey);
+  if (cached && now - cached.fetchedAt < EPA_CACHE_TTL_MS) {
+    const result = new Map<number, StatboticsTeamYear>();
+    teamNumbers.forEach((tn) => {
+      const epa = cached.data.get(tn);
+      if (epa) result.set(tn, epa);
+    });
+    return result;
+  }
 
-  console.log(`📡 [STATBOTICS API] Waiting for all ${teamNumbers.length} requests to complete...`);
-  const results = await Promise.allSettled(promises);
-  
-  const successful = results.filter(r => r.status === 'fulfilled').length;
-  const failed = results.filter(r => r.status === 'rejected').length;
-  
-  console.log(`📊 [STATBOTICS API] Batch fetch complete: ${successful} successful, ${failed} failed, ${epaMap.size} teams with EPA data`);
-  
+  const epaMap = new Map<number, StatboticsTeamYear>();
+  const fetchPromises = teamNumbers.map(async (teamNumber) => {
+    const epa = await getTeamYearEPA(teamNumber, year);
+    if (epa) epaMap.set(teamNumber, epa);
+  });
+  await Promise.allSettled(fetchPromises);
+
+  epaCache.set(cacheKey, { data: new Map(epaMap), fetchedAt: now });
   return epaMap;
 }

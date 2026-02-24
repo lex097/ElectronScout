@@ -1,6 +1,6 @@
 // components/betting/BettingModal.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,9 +39,9 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   // Winner bet state
   const [selectedAlliance, setSelectedAlliance] = useState<'red' | 'blue' | null>(null);
   
-  // Margin bet state
+  // Margin bet state (range-based: '0-0.5', '0.5-0.75', etc.)
   const [selectedMarginAlliance, setSelectedMarginAlliance] = useState<'red' | 'blue' | null>(null);
-  const [selectedMargin, setSelectedMargin] = useState<number | null>(null);
+  const [selectedMargin, setSelectedMargin] = useState<string | null>(null);
   
   // Parlay margin alliance state (separate from regular margin tab)
   const [selectedParlayMarginAlliance, setSelectedParlayMarginAlliance] = useState<'red' | 'blue' | null>(null);
@@ -64,10 +64,16 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   const redTeams = match.alliances.red.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
   const blueTeams = match.alliances.blue.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
 
-  // Load odds when modal opens
+  // Load odds when modal opens; use cache for instant reopen of same match
   useEffect(() => {
     if (visible) {
-      loadOdds();
+      const cached = bettingService.getCachedOdds(redTeams, blueTeams, eventKey, match.key);
+      if (cached) {
+        setOdds(cached);
+        setIsLoadingOdds(false);
+      } else {
+        loadOdds();
+      }
     } else {
       // Reset state when closing
       setActiveTab('winner');
@@ -80,12 +86,12 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
       setOverUnder(null);
       setParlayBets([]);
     }
-  }, [visible]);
+  }, [visible, eventKey, match.key]);
 
   const loadOdds = async () => {
     setIsLoadingOdds(true);
     try {
-      const matchOdds = await bettingService.calculateMatchOdds(redTeams, blueTeams, eventKey);
+      const matchOdds = await bettingService.calculateMatchOdds(redTeams, blueTeams, eventKey, match.key);
       setOdds(matchOdds);
     } catch (error) {
       console.error('Error loading odds:', error);
@@ -95,44 +101,24 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
     }
   };
 
-  // Calculate dynamic margin options (0.5x, 0.75x, 1x, 1.25x, 1.5x of expected margin)
+  // Margin options: stdev-based (2above, 1above, mean, 1below, 2below) - computed per alliance
   const marginOptions = useMemo(() => {
-    if (!odds) return [];
-    
-    const expectedMargin = odds.expectedMargin;
-    
-    // Always return exactly 0.5x, 0.75x, 1x, 1.25x, and 1.5x of expected margin
-    if (expectedMargin > 0) {
-      return [
-        Math.round(expectedMargin * 0.5),
-        Math.round(expectedMargin * 0.75),
-        Math.round(expectedMargin * 1.0),
-        Math.round(expectedMargin * 1.25),
-        Math.round(expectedMargin * 1.5),
-      ];
-    } else {
-      // Default margins if no data (using 10 as base)
-      return [5, 7, 10, 12, 15];
-    }
-  }, [odds]);
+    if (!odds || !selectedMarginAlliance) return [];
+    return bettingService.getMarginOptions(odds.expectedMargin, odds.marginStd, selectedMarginAlliance);
+  }, [odds, selectedMarginAlliance]);
 
-  // Calculate over/under thresholds (0.75x, 1x, 1.25x of expected total)
-  const overUnderThresholds = useMemo(() => {
+  // Parlay margin options - lazy: only compute when user visits parlay tab
+  const hasVisitedParlay = useRef(false);
+  if (activeTab === 'parlay') hasVisitedParlay.current = true;
+  const parlayMarginOptions = useMemo(() => {
+    if (!hasVisitedParlay.current || !odds || !selectedParlayMarginAlliance) return [];
+    return bettingService.getMarginOptions(odds.expectedMargin, odds.marginStd, selectedParlayMarginAlliance);
+  }, [odds, selectedParlayMarginAlliance, activeTab]);
+
+  // Over/under options: stdev-based (at mean, ±1, ±2) - exclude if threshold < 0
+  const overUnderOptions = useMemo(() => {
     if (!odds) return [];
-    
-    const expectedTotal = odds.expectedTotal;
-    
-    // Always return exactly 0.75x, 1x, and 1.25x of expected total
-    if (expectedTotal > 0) {
-      return [
-        Math.round(expectedTotal * 0.75),
-        Math.round(expectedTotal * 1.0),
-        Math.round(expectedTotal * 1.25),
-      ];
-    } else {
-      // Default thresholds if no data (using 100 as base)
-      return [75, 100, 125];
-    }
+    return bettingService.getOverUnderOptions(odds.expectedTotal, odds.totalStd);
   }, [odds]);
 
   const getConfidenceColor = (confidence: number): string => {
@@ -180,14 +166,14 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
           };
           break;
 
-        case 'margin':
-          if (selectedMargin === null || !odds) {
-            Alert.alert('Invalid Bet', 'Please select a margin');
+        case 'margin': {
+          if (selectedMargin === null || !odds || !selectedMarginAlliance) {
+            Alert.alert('Invalid Bet', 'Please select a margin and alliance');
             setIsPlacingBet(false);
             return;
           }
-          if (!selectedMarginAlliance) {
-            Alert.alert('Invalid Bet', 'Please select an alliance');
+          const marginOpt = marginOptions.find((o) => o.rangeKey === selectedMargin);
+          if (!marginOpt) {
             setIsPlacingBet(false);
             return;
           }
@@ -195,21 +181,28 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
             odds.expectedMargin,
             selectedMargin,
             selectedMarginAlliance,
-            odds.redAverage,
-            odds.blueAverage,
-            odds.matchConfidence
+            odds.marginStd,
+            odds.matchConfidence,
+            marginOpt.lowerBound,
+            marginOpt.upperBound
           );
           betData = {
             matchKey: match.key,
             matchNumber: match.match_number,
             eventKey,
             betType: 'margin',
-            betDetails: { margin: selectedMargin, alliance: selectedMarginAlliance },
+            betDetails: {
+              marginRange: selectedMargin,
+              alliance: selectedMarginAlliance,
+              lowerBound: marginOpt.lowerBound,
+              upperBound: marginOpt.upperBound,
+            },
             betAmount: amount,
             odds: betOdds,
             potentialPayout: Math.round(amount * betOdds),
           };
           break;
+        }
 
         case 'over_under':
           if (selectedThreshold === null || !overUnder || !odds) {
@@ -222,6 +215,7 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
             selectedThreshold,
             overUnder,
             odds.matchConfidence,
+            odds.totalStd,
             odds.leagueAverage
           );
           betData = {
@@ -469,28 +463,26 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
 
         {selectedMarginAlliance && (
           <View style={styles.marginList}>
-            {marginOptions.map((margin, index) => {
+            {marginOptions.map((opt) => {
               const marginOdds = bettingService.calculateMarginOdds(
                 odds.expectedMargin,
-                margin,
+                opt.rangeKey,
                 selectedMarginAlliance,
-                odds.redAverage,
-                odds.blueAverage,
-                odds.matchConfidence
+                odds.marginStd,
+                odds.matchConfidence,
+                opt.lowerBound,
+                opt.upperBound
               );
-              const isSelected = selectedMargin === margin;
-              const multiplier = [0.5, 0.75, 1.0, 1.25, 1.5][index];
-              const label = multiplier === 1.0 ? 'Expected' : `${multiplier}x`;
+              const isSelected = selectedMargin === opt.rangeKey;
 
               return (
                 <TouchableOpacity
-                  key={margin}
+                  key={opt.rangeKey}
                   style={[styles.marginListItem, isSelected && styles.marginListItemSelected]}
-                  onPress={() => setSelectedMargin(margin)}
+                  onPress={() => setSelectedMargin(opt.rangeKey)}
                 >
                   <View style={styles.marginListLeft}>
-                    <Text style={styles.marginListLabel}>{label}</Text>
-                    <Text style={styles.marginListPoints}>{margin}+ points</Text>
+                    <Text style={styles.marginListLabel}>{opt.label}</Text>
                   </View>
                   <View style={styles.marginListRight}>
                     <Text style={[
@@ -520,69 +512,56 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
         </Text>
 
         <View style={styles.thresholdOptions}>
-          {overUnderThresholds.map((threshold) => {
-            const overOdds = bettingService.calculateOverUnderOdds(
-              odds.expectedTotal,
-              threshold,
-              'over',
-              odds.matchConfidence,
-              odds.leagueAverage
-            );
-            const underOdds = bettingService.calculateOverUnderOdds(
-              odds.expectedTotal,
-              threshold,
-              'under',
-              odds.matchConfidence,
-              odds.leagueAverage
-            );
-            const isOverSelected = selectedThreshold === threshold && overUnder === 'over';
-            const isUnderSelected = selectedThreshold === threshold && overUnder === 'under';
-
-            return (
-              <View key={threshold} style={styles.overUnderRow}>
+          {overUnderOptions.map((row, idx) => (
+            <View key={idx} style={styles.overUnderRow}>
+              {row.over && (
                 <TouchableOpacity
                   style={[
                     styles.marginOption,
                     styles.overUnderButton,
-                    isOverSelected && styles.marginOptionSelected
+                    selectedThreshold === row.over.threshold && overUnder === 'over' && styles.marginOptionSelected
                   ]}
                   onPress={() => {
-                    if (isOverSelected) {
-                      // Deselect if already selected
+                    if (selectedThreshold === row.over!.threshold && overUnder === 'over') {
                       setSelectedThreshold(null);
                       setOverUnder(null);
                     } else {
-                      setSelectedThreshold(threshold);
+                      setSelectedThreshold(row.over!.threshold);
                       setOverUnder('over');
                     }
                   }}
                 >
-                  <Text style={styles.marginOptionText}>Over {threshold}</Text>
-                  <Text style={styles.marginOptionOdds}>{overOdds.toFixed(2)}x</Text>
+                  <Text style={styles.marginOptionText}>{row.over.label}</Text>
+                  <Text style={styles.marginOptionOdds}>
+                    {bettingService.calculateOverUnderOdds(odds.expectedTotal, row.over.threshold, 'over', odds.matchConfidence, odds.totalStd, odds.leagueAverage).toFixed(2)}x
+                  </Text>
                 </TouchableOpacity>
+              )}
+              {row.under && (
                 <TouchableOpacity
                   style={[
                     styles.marginOption,
                     styles.overUnderButton,
-                    isUnderSelected && styles.marginOptionSelected
+                    selectedThreshold === row.under.threshold && overUnder === 'under' && styles.marginOptionSelected
                   ]}
                   onPress={() => {
-                    if (isUnderSelected) {
-                      // Deselect if already selected
+                    if (selectedThreshold === row.under!.threshold && overUnder === 'under') {
                       setSelectedThreshold(null);
                       setOverUnder(null);
                     } else {
-                      setSelectedThreshold(threshold);
+                      setSelectedThreshold(row.under!.threshold);
                       setOverUnder('under');
                     }
                   }}
                 >
-                  <Text style={styles.marginOptionText}>Under {threshold}</Text>
-                  <Text style={styles.marginOptionOdds}>{underOdds.toFixed(2)}x</Text>
+                  <Text style={styles.marginOptionText}>{row.under.label}</Text>
+                  <Text style={styles.marginOptionOdds}>
+                    {bettingService.calculateOverUnderOdds(odds.expectedTotal, row.under.threshold, 'under', odds.matchConfidence, odds.totalStd, odds.leagueAverage).toFixed(2)}x
+                  </Text>
                 </TouchableOpacity>
-              </View>
-            );
-          })}
+              )}
+            </View>
+          ))}
         </View>
       </View>
     );
@@ -616,9 +595,23 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 if (existingBet) {
                   removeParlayBet('winner');
                 } else {
+                  const hadWrongMargin = parlayBets.some((b) => b.type === 'margin' && b.details?.alliance !== 'red');
+                  if (hadWrongMargin) setSelectedMargin(null);
                   setSelectedAlliance('red');
                   setSelectedParlayMarginAlliance('red');
-                  addParlayBet('winner', { alliance: 'red' }, odds.redOdds);
+                  setParlayBets((prev) => {
+                    const withoutWrongMargin = prev.filter(
+                      (b) => b.type !== 'margin' || b.details?.alliance === 'red'
+                    );
+                    const winnerIdx = withoutWrongMargin.findIndex((b) => b.type === 'winner');
+                    const newBet = { type: 'winner' as const, details: { alliance: 'red' as const }, odds: odds.redOdds };
+                    if (winnerIdx >= 0) {
+                      const next = [...withoutWrongMargin];
+                      next[winnerIdx] = newBet;
+                      return next;
+                    }
+                    return [...withoutWrongMargin, newBet];
+                  });
                 }
               }}
             >
@@ -639,9 +632,23 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 if (existingBet) {
                   removeParlayBet('winner');
                 } else {
+                  const hadWrongMargin = parlayBets.some((b) => b.type === 'margin' && b.details?.alliance !== 'blue');
+                  if (hadWrongMargin) setSelectedMargin(null);
                   setSelectedAlliance('blue');
                   setSelectedParlayMarginAlliance('blue');
-                  addParlayBet('winner', { alliance: 'blue' }, odds.blueOdds);
+                  setParlayBets((prev) => {
+                    const withoutWrongMargin = prev.filter(
+                      (b) => b.type !== 'margin' || b.details?.alliance === 'blue'
+                    );
+                    const winnerIdx = withoutWrongMargin.findIndex((b) => b.type === 'winner');
+                    const newBet = { type: 'winner' as const, details: { alliance: 'blue' as const }, odds: odds.blueOdds };
+                    if (winnerIdx >= 0) {
+                      const next = [...withoutWrongMargin];
+                      next[winnerIdx] = newBet;
+                      return next;
+                    }
+                    return [...withoutWrongMargin, newBet];
+                  });
                 }
               }}
             >
@@ -666,21 +673,21 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 (selectedParlayMarginAlliance === 'red' || parlayBets.find(b => b.type === 'margin' && b.details?.alliance === 'red')) && styles.parlayAllianceButtonActive
               ]}
               onPress={() => {
-                // Remove existing margin bet if switching alliance
-                const existingBet = parlayBets.find(b => b.type === 'margin');
-                if (existingBet) {
-                  removeParlayBet('margin');
-                }
+                const hadMarginBet = parlayBets.some((b) => b.type === 'margin');
+                if (hadMarginBet) setSelectedMargin(null);
                 setSelectedParlayMarginAlliance('red');
-                // Also update winner selection if not already set
-                const existingWinnerBet = parlayBets.find(b => b.type === 'winner');
-                if (!existingWinnerBet || existingWinnerBet.details?.alliance !== 'red') {
-                  setSelectedAlliance('red');
-                  if (existingWinnerBet) {
-                    removeParlayBet('winner');
+                setSelectedAlliance('red');
+                setParlayBets((prev) => {
+                  const withoutMargin = prev.filter((b) => b.type !== 'margin');
+                  const winnerIdx = withoutMargin.findIndex((b) => b.type === 'winner');
+                  const newBet = { type: 'winner' as const, details: { alliance: 'red' as const }, odds: odds.redOdds };
+                  if (winnerIdx >= 0) {
+                    const next = [...withoutMargin];
+                    next[winnerIdx] = newBet;
+                    return next;
                   }
-                  addParlayBet('winner', { alliance: 'red' }, odds.redOdds);
-                }
+                  return [...withoutMargin, newBet];
+                });
               }}
             >
               <Text style={[
@@ -696,21 +703,21 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 (selectedParlayMarginAlliance === 'blue' || parlayBets.find(b => b.type === 'margin' && b.details?.alliance === 'blue')) && styles.parlayAllianceButtonActive
               ]}
               onPress={() => {
-                // Remove existing margin bet if switching alliance
-                const existingBet = parlayBets.find(b => b.type === 'margin');
-                if (existingBet) {
-                  removeParlayBet('margin');
-                }
+                const hadMarginBet = parlayBets.some((b) => b.type === 'margin');
+                if (hadMarginBet) setSelectedMargin(null);
                 setSelectedParlayMarginAlliance('blue');
-                // Also update winner selection if not already set
-                const existingWinnerBet = parlayBets.find(b => b.type === 'winner');
-                if (!existingWinnerBet || existingWinnerBet.details?.alliance !== 'blue') {
-                  setSelectedAlliance('blue');
-                  if (existingWinnerBet) {
-                    removeParlayBet('winner');
+                setSelectedAlliance('blue');
+                setParlayBets((prev) => {
+                  const withoutMargin = prev.filter((b) => b.type !== 'margin');
+                  const winnerIdx = withoutMargin.findIndex((b) => b.type === 'winner');
+                  const newBet = { type: 'winner' as const, details: { alliance: 'blue' as const }, odds: odds.blueOdds };
+                  if (winnerIdx >= 0) {
+                    const next = [...withoutMargin];
+                    next[winnerIdx] = newBet;
+                    return next;
                   }
-                  addParlayBet('winner', { alliance: 'blue' }, odds.blueOdds);
-                }
+                  return [...withoutMargin, newBet];
+                });
               }}
             >
               <Text style={[
@@ -723,20 +730,23 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
           </View>
           {selectedParlayMarginAlliance && (
             <View style={styles.marginOptions}>
-              {marginOptions.map((margin) => {
+              {parlayMarginOptions.map((opt) => {
                 const marginOdds = bettingService.calculateMarginOdds(
                   odds.expectedMargin,
-                  margin,
-                  selectedParlayMarginAlliance,
-                  odds.redAverage,
-                  odds.blueAverage,
-                  odds.matchConfidence
+                  opt.rangeKey,
+                  selectedParlayMarginAlliance!,
+                  odds.marginStd,
+                  odds.matchConfidence,
+                  opt.lowerBound,
+                  opt.upperBound
                 );
                 const existingMarginBet = parlayBets.find(b => b.type === 'margin');
-                const isSelected = existingMarginBet && existingMarginBet.details?.margin === margin;
+                const isSelected = existingMarginBet
+                  && existingMarginBet.details?.alliance === selectedParlayMarginAlliance
+                  && existingMarginBet.details?.marginRange === opt.rangeKey;
                 return (
                   <TouchableOpacity
-                    key={margin}
+                    key={opt.rangeKey}
                     style={[
                       styles.parlaySelectButton,
                       isSelected && styles.parlaySelectButtonSelected
@@ -745,8 +755,13 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                       if (isSelected) {
                         removeParlayBet('margin');
                       } else {
-                        setSelectedMargin(margin);
-                        addParlayBet('margin', { margin, alliance: selectedParlayMarginAlliance }, marginOdds);
+                        setSelectedMargin(opt.rangeKey);
+                        addParlayBet('margin', {
+                          marginRange: opt.rangeKey,
+                          alliance: selectedParlayMarginAlliance,
+                          lowerBound: opt.lowerBound,
+                          upperBound: opt.upperBound,
+                        }, marginOdds);
                       }
                     }}
                   >
@@ -754,7 +769,7 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                       styles.parlaySelectText,
                       isSelected && styles.parlaySelectTextSelected
                     ]}>
-                      {margin}+ ({marginOdds.toFixed(2)}x)
+                      {opt.label} ({marginOdds.toFixed(2)}x)
                     </Text>
                   </TouchableOpacity>
                 );
@@ -767,81 +782,60 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
         <View style={styles.parlayOption}>
           <Text style={styles.parlayOptionTitle}>Over/Under</Text>
           <View style={styles.thresholdOptions}>
-            {overUnderThresholds.slice(0, 3).map((threshold) => {
-              const overOdds = bettingService.calculateOverUnderOdds(
-                odds.expectedTotal,
-                threshold,
-                'over',
-                odds.matchConfidence,
-                odds.leagueAverage
-              );
-              const underOdds = bettingService.calculateOverUnderOdds(
-                odds.expectedTotal,
-                threshold,
-                'under',
-                odds.matchConfidence,
-                odds.leagueAverage
-              );
-              const isOverSelected = parlayBets.find(b => 
-                b.type === 'over_under' && 
-                b.details?.threshold === threshold && 
-                (b.details?.overUnder === 'over' || b.details?.over_under === 'over')
-              );
-              const isUnderSelected = parlayBets.find(b => 
-                b.type === 'over_under' && 
-                b.details?.threshold === threshold && 
-                (b.details?.overUnder === 'under' || b.details?.over_under === 'under')
-              );
-              
-              return (
-                <View key={threshold} style={styles.parlayOverUnderRow}>
+            {overUnderOptions.map((row, idx) => (
+              <View key={idx} style={styles.parlayOverUnderRow}>
+                {row.over && (
                   <TouchableOpacity
                     style={[
                       styles.parlaySelectButton,
-                      isOverSelected && styles.parlaySelectButtonSelected
+                      parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.over!.threshold && (b.details?.overUnder === 'over' || b.details?.over_under === 'over')) && styles.parlaySelectButtonSelected
                     ]}
                     onPress={() => {
-                      if (isOverSelected) {
-                        removeParlayBet('over_under', { threshold, overUnder: 'over' });
+                      const existing = parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.over!.threshold && (b.details?.overUnder === 'over' || b.details?.over_under === 'over'));
+                      if (existing) {
+                        removeParlayBet('over_under', { threshold: row.over!.threshold, overUnder: 'over' });
                       } else {
-                        setSelectedThreshold(threshold);
+                        setSelectedThreshold(row.over!.threshold);
                         setOverUnder('over');
-                        addParlayBet('over_under', { threshold, overUnder: 'over' }, overOdds);
+                        addParlayBet('over_under', { threshold: row.over!.threshold, overUnder: 'over' }, bettingService.calculateOverUnderOdds(odds.expectedTotal, row.over!.threshold, 'over', odds.matchConfidence, odds.totalStd, odds.leagueAverage));
                       }
                     }}
                   >
                     <Text style={[
                       styles.parlaySelectText,
-                      isOverSelected && styles.parlaySelectTextSelected
+                      parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.over!.threshold && (b.details?.overUnder === 'over' || b.details?.over_under === 'over')) && styles.parlaySelectTextSelected
                     ]}>
-                      Over {threshold} ({overOdds.toFixed(2)}x)
+                      {row.over.label} ({bettingService.calculateOverUnderOdds(odds.expectedTotal, row.over.threshold, 'over', odds.matchConfidence, odds.totalStd, odds.leagueAverage).toFixed(2)}x)
                     </Text>
                   </TouchableOpacity>
+                )}
+                {row.under && (
                   <TouchableOpacity
                     style={[
                       styles.parlaySelectButton,
-                      isUnderSelected && styles.parlaySelectButtonSelected
+                      parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.under!.threshold && (b.details?.overUnder === 'under' || b.details?.over_under === 'under')) && styles.parlaySelectButtonSelected
                     ]}
                     onPress={() => {
-                      if (isUnderSelected) {
-                        removeParlayBet('over_under', { threshold, overUnder: 'under' });
+                      const existing = parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.under!.threshold && (b.details?.overUnder === 'under' || b.details?.over_under === 'under'));
+                      if (existing) {
+                        removeParlayBet('over_under', { threshold: row.under!.threshold, overUnder: 'under' });
                       } else {
-                        setSelectedThreshold(threshold);
+                        setSelectedThreshold(row.under!.threshold);
                         setOverUnder('under');
-                        addParlayBet('over_under', { threshold, overUnder: 'under' }, underOdds);
+                        addParlayBet('over_under', { threshold: row.under!.threshold, overUnder: 'under' }, bettingService.calculateOverUnderOdds(odds.expectedTotal, row.under!.threshold, 'under', odds.matchConfidence, odds.totalStd, odds.leagueAverage));
                       }
                     }}
                   >
                     <Text style={[
                       styles.parlaySelectText,
-                      isUnderSelected && styles.parlaySelectTextSelected
+                      parlayBets.find(b => b.type === 'over_under' && b.details?.threshold === row.under!.threshold && (b.details?.overUnder === 'under' || b.details?.over_under === 'under')) && styles.parlaySelectTextSelected
                     ]}>
-                      Under {threshold} ({underOdds.toFixed(2)}x)
+                      {row.under.label} ({bettingService.calculateOverUnderOdds(odds.expectedTotal, row.under.threshold, 'under', odds.matchConfidence, odds.totalStd, odds.leagueAverage).toFixed(2)}x)
                     </Text>
                   </TouchableOpacity>
-                </View>
-              );
-            })}
+                )}
+              </View>
+            ))}
           </View>
         </View>
 
@@ -862,9 +856,18 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 switch (bet.type) {
                   case 'winner':
                     return `${bet.details?.alliance === 'red' ? 'Red' : 'Blue'} wins`;
-                  case 'margin':
+                  case 'margin': {
                     const alliance = bet.details?.alliance === 'red' ? 'Red' : 'Blue';
+                    const lo = bet.details?.lowerBound;
+                    const hi = bet.details?.upperBound;
+                    if (lo != null || hi != null) {
+                      const a = lo != null ? Math.round(Math.abs(lo)) : null;
+                      const b = hi != null ? Math.round(Math.abs(hi)) : null;
+                      const label = b === null ? `${a}+ pts` : a === null ? `${b}+ pts` : `${Math.min(a, b)}-${Math.max(a, b)} pts`;
+                      return `${alliance} wins ${label}`;
+                    }
                     return `${alliance} wins by ${bet.details?.margin}+ points`;
+                  }
                   case 'over_under':
                     const overUnder = bet.details?.overUnder || bet.details?.over_under;
                     return `Total ${overUnder === 'over' ? 'Over' : 'Under'} ${bet.details?.threshold}`;
@@ -900,18 +903,21 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
         if (selectedAlliance === 'red') betOdds = odds.redOdds;
         else if (selectedAlliance === 'blue') betOdds = odds.blueOdds;
         break;
-      case 'margin':
-        if (selectedMargin !== null && selectedMarginAlliance) {
+      case 'margin': {
+        const marginOpt = marginOptions.find((o) => o.rangeKey === selectedMargin);
+        if (selectedMargin !== null && selectedMarginAlliance && marginOpt) {
           betOdds = bettingService.calculateMarginOdds(
             odds.expectedMargin,
             selectedMargin,
             selectedMarginAlliance,
-            odds.redAverage,
-            odds.blueAverage,
-            odds.matchConfidence
+            odds.marginStd,
+            odds.matchConfidence,
+            marginOpt.lowerBound,
+            marginOpt.upperBound
           );
         }
         break;
+      }
       case 'over_under':
         if (selectedThreshold !== null && overUnder) {
           betOdds = bettingService.calculateOverUnderOdds(
@@ -919,6 +925,7 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
             selectedThreshold,
             overUnder,
             odds.matchConfidence,
+            odds.totalStd,
             odds.leagueAverage
           );
         }
@@ -1163,6 +1170,7 @@ const styles = StyleSheet.create({
   },
   allianceCardSelected: {
     borderColor: '#ff6600',
+    backgroundColor: '#3a2a1a',
   },
   allianceHeader: {
     flexDirection: 'row',
@@ -1226,11 +1234,12 @@ const styles = StyleSheet.create({
   },
   marginOptionSelected: {
     borderColor: '#ff6600',
+    backgroundColor: '#3a2a1a',
   },
   marginOptionText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '600',
     marginBottom: 4,
   },
   marginOptionOdds: {
@@ -1259,9 +1268,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   marginListLabel: {
-    color: '#888',
-    fontSize: 12,
-    fontWeight: '500',
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1435,7 +1444,7 @@ const styles = StyleSheet.create({
   },
   parlaySelectText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 16,
   },
   parlaySelectTextSelected: {
     color: '#ff6600',

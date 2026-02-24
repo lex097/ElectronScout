@@ -3,6 +3,7 @@ import { Tabs, router } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { BetNotificationCard } from '@/components/betting/BetNotificationCard';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
@@ -44,8 +45,10 @@ export default function TabLayout() {
   }
 
   return (
-    <Tabs
-      screenOptions={{
+    <>
+      <BetNotificationCard />
+      <Tabs
+        screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         tabBarInactiveTintColor: '#888',
         tabBarStyle: {
@@ -179,5 +182,6 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    </>
   );
 }

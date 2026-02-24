@@ -50,11 +50,8 @@ export default function SelectEventScreen() {
     // Save selected event info to AsyncStorage
     await AsyncStorage.setItem('selected_event_key', event.key);
     await AsyncStorage.setItem('selected_event_name', event.name);
-    
-    router.push({
-      pathname: '/select-match' as any,
-      params: { eventKey: event.key },
-    });
+
+    router.back();
   };
 
   const formatDate = (dateString: string) => {

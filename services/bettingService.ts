@@ -3,7 +3,26 @@ import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
-import { LeagueAverage, teamStatisticsService } from './teamStatisticsService';
+import { LeagueAverage, TeamStatistics, teamStatisticsService } from './teamStatisticsService';
+
+/** Normal CDF approximation (Abramowitz & Stegun). Returns P(X <= x) for N(mean, std). */
+function normalCDF(x: number, mean: number, std: number): number {
+  if (std <= 0) return x >= mean ? 1 : 0;
+  const z = (x - mean) / std;
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d =
+    0.3989423 *
+    Math.exp((-z * z) / 2) *
+    (0.3193815 * t - 0.3565638 * t * t + 1.781478 * t * t * t - 1.821256 * t * t * t * t + 1.330274 * t * t * t * t * t);
+  const p = z >= 0 ? 1 - d : d;
+  return Math.max(0, Math.min(1, p));
+}
+
+/** P(lower <= X <= upper) for N(mean, std) */
+function normalCDFRange(lower: number, upper: number, mean: number, std: number): number {
+  if (std <= 0) return lower <= mean && mean <= upper ? 1 : 0;
+  return normalCDF(upper, mean, std) - normalCDF(lower, mean, std);
+}
 
 export interface BetData {
   matchKey: string;
@@ -12,7 +31,11 @@ export interface BetData {
   betType: 'winner' | 'margin' | 'over_under' | 'parlay';
   betDetails: {
     alliance?: 'red' | 'blue';
-    margin?: number;
+    margin?: number; // Legacy: threshold in points
+    marginRange?: string;
+    expectedMarginAtBet?: number;
+    lowerBound?: number | null; // Stdev-based margin range
+    upperBound?: number | null;
     threshold?: number;
     overUnder?: 'over' | 'under';
     parlayBets?: Array<{
@@ -47,6 +70,10 @@ export interface AllianceData {
   teams: number[];
   average: number;
   confidence: number;
+  /** Combined stdev = sqrt(var1 + var2 + var3) for 3-team alliance. No default fallback. */
+  stdDev?: number;
+  /** Count of teams with valid betting data (avg + stdev). Used for eligibility. */
+  teamsWithValidData: number;
 }
 
 export interface MatchOdds {
@@ -60,9 +87,82 @@ export interface MatchOdds {
   leagueAverage?: LeagueAverage;
   redAverage: number;
   blueAverage: number;
+  /** Stdev of margin (Red - Blue) for normal distribution odds */
+  marginStd: number;
+  /** Stdev of total (Red + Blue) for over/under odds */
+  totalStd: number;
 }
 
+const ODDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes max
+
 class BettingService {
+  private oddsCache = new Map<string, { odds: MatchOdds; fetchedAt: number }>();
+  private oddsInFlight = new Map<string, Promise<MatchOdds>>();
+
+  private getOddsCacheKey(redTeams: number[], blueTeams: number[], eventKey: string, matchKey?: string): string {
+    return matchKey ?? `${eventKey}:${redTeams.join(',')}:${blueTeams.join(',')}`;
+  }
+
+  /**
+   * Check if betting is allowed for a match. Requires at least 2 teams with valid data
+   * (manually scouted or Statbotics) per alliance. No default stdev/means - blocks when insufficient.
+   */
+  async checkBettingEligibility(
+    redTeams: number[],
+    blueTeams: number[],
+    eventKey: string,
+    matchKey?: string
+  ): Promise<{ canBet: boolean; reason?: string }> {
+    try {
+      await teamStatisticsService.refreshTeamStatistics();
+      const allTeams = [...redTeams, ...blueTeams];
+      const allStats = await teamStatisticsService.getTeamStatisticsBatch(allTeams, eventKey);
+      const redAlliance = this.buildAllianceDataFromStats(redTeams, allStats);
+      const blueAlliance = this.buildAllianceDataFromStats(blueTeams, allStats);
+
+      const redOk = redAlliance.teamsWithValidData >= 2;
+      const blueOk = blueAlliance.teamsWithValidData >= 2;
+      if (!redOk || !blueOk) {
+        return {
+          canBet: false,
+          reason: 'Insufficient data for accurate odds. Need at least 2 teams with data per alliance (manually scouted or Statbotics).',
+        };
+      }
+      const redVar = (redAlliance.stdDev ?? 0) ** 2;
+      const blueVar = (blueAlliance.stdDev ?? 0) ** 2;
+      const marginStd = Math.sqrt(redVar + blueVar);
+      if (marginStd <= 0) {
+        return { canBet: false, reason: 'Insufficient data for accurate odds.' };
+      }
+      return { canBet: true };
+    } catch (error) {
+      console.error('Error checking betting eligibility:', error);
+      return { canBet: false, reason: 'Insufficient data for accurate odds.' };
+    }
+  }
+
+  /**
+   * Preload odds for a match (call when user taps Place Bet, before modal opens).
+   * Populates cache so modal open is near-instant.
+   */
+  preloadOdds(redTeams: number[], blueTeams: number[], eventKey: string, matchKey?: string): void {
+    this.calculateMatchOdds(redTeams, blueTeams, eventKey, matchKey).catch(() => {
+      // Silently ignore; modal will retry when it opens
+    });
+  }
+
+  /**
+   * Get cached odds synchronously (for instant display when reopening same match).
+   */
+  getCachedOdds(redTeams: number[], blueTeams: number[], eventKey: string, matchKey?: string): MatchOdds | null {
+    const cacheKey = this.getOddsCacheKey(redTeams, blueTeams, eventKey, matchKey);
+    const cached = this.oddsCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < ODDS_CACHE_TTL_MS) {
+      return cached.odds;
+    }
+    return null;
+  }
+
   /**
    * Get user identifier (scout_name:team_number)
    */
@@ -100,7 +200,48 @@ class BettingService {
   }
 
   /**
-   * Calculate alliance averages and confidence
+   * Build AllianceData from pre-fetched team statistics (sync, no I/O).
+   * No default stdev - only teams with valid blendedStdDev or stdDevScore contribute to variance.
+   */
+  private buildAllianceDataFromStats(
+    teams: number[],
+    teamStats: Map<number, TeamStatistics>
+  ): AllianceData {
+    if (teams.length === 0) {
+      return { teams: [], average: 0, confidence: 0.0, stdDev: 0, teamsWithValidData: 0 };
+    }
+    let totalAverage = 0;
+    let totalConfidence = 0;
+    let validTeams = 0;
+    let teamsWithValidData = 0;
+    teams.forEach((teamNumber) => {
+      const stats = teamStats.get(teamNumber);
+      if (stats) {
+        const confidence = Math.min(1.0, stats.matchCount * 0.2);
+        totalAverage += stats.avgMatchScore;
+        totalConfidence += confidence;
+        validTeams++;
+        const sd = stats.blendedStdDev ?? stats.stdDevScore;
+        const hasValidSd = typeof sd === 'number' && sd > 0;
+        const hasValidAvg = stats.avgMatchScore > 0 || stats.matchCount > 0;
+        if (hasValidSd && hasValidAvg) teamsWithValidData++;
+      }
+    });
+    const average = validTeams > 0 ? totalAverage / validTeams : 0;
+    const confidence = validTeams > 0 ? totalConfidence / validTeams : 0.0;
+    const totalVariance = teams.reduce((sum, tn) => {
+      const stats = teamStats.get(tn);
+      if (!stats) return sum;
+      const sd = stats.blendedStdDev ?? stats.stdDevScore;
+      if (typeof sd === 'number' && sd > 0) return sum + sd * sd;
+      return sum;
+    }, 0);
+    const stdDev = Math.sqrt(totalVariance);
+    return { teams, average, confidence, stdDev, teamsWithValidData };
+  }
+
+  /**
+   * Calculate alliance averages and confidence (fetches data; use for single-alliance needs)
    */
   async calculateAllianceAverages(
     teams: number[],
@@ -108,90 +249,14 @@ class BettingService {
   ): Promise<AllianceData> {
     try {
       if (teams.length === 0) {
-        return { teams: [], average: 0, confidence: 0.0 };
+        return { teams: [], average: 0, confidence: 0.0, stdDev: 0, teamsWithValidData: 0 };
       }
-
-      // Refresh materialized view to ensure we have latest data
       await teamStatisticsService.refreshTeamStatistics();
-
-      // Get statistics for all teams in alliance
       const teamStats = await teamStatisticsService.getTeamStatisticsBatch(teams, eventKey);
-      
-      // Debug logging with EPA status
-      const teamStatsArray = Array.from(teamStats.entries()).map(([teamNum, stats]) => ({
-        teamNumber: teamNum,
-        matchCount: stats.matchCount,
-        avgMatchScore: stats.avgMatchScore,
-        eventKey: stats.eventKey,
-        confidence: Math.min(1.0, stats.matchCount * 0.2),
-        usesEPA: stats.matchCount < 4, // Teams with < 4 matches likely use EPA
-      }));
-      
-      console.log('🔍 Alliance Averages Debug:', {
-        alliance: teams.length === 3 ? 'Red' : 'Blue',
-        teams,
-        eventKey,
-        teamStatsSize: teamStats.size,
-        teamStatsData: teamStatsArray,
-      });
-      
-      // Log EPA usage summary
-      const teamsUsingEPA = teamStatsArray.filter(t => t.usesEPA);
-      if (teamsUsingEPA.length > 0) {
-        console.log(`📊 [EPA SUMMARY] ${teamsUsingEPA.length} team(s) using EPA blend:`, 
-          teamsUsingEPA.map(t => `Team ${t.teamNumber} (${t.matchCount} matches, ${(t.confidence * 100).toFixed(0)}% confidence, avg: ${t.avgMatchScore.toFixed(2)})`)
-        );
-      }
-      
-      let totalAverage = 0;
-      let totalConfidence = 0;
-      let validTeams = 0;
-
-      teams.forEach(teamNumber => {
-        const stats = teamStats.get(teamNumber);
-        if (stats) {
-          const confidence = Math.min(1.0, stats.matchCount * 0.2);
-          const usesEPA = stats.matchCount < 4;
-          
-          console.log(`✅ Team ${teamNumber} stats:`, {
-            matchCount: stats.matchCount,
-            avgMatchScore: stats.avgMatchScore.toFixed(2),
-            confidence: `${(confidence * 100).toFixed(0)}%`,
-            usesEPA: usesEPA ? 'Yes (blended with Statbotics EPA)' : 'No (scouted only)',
-            eventKey: stats.eventKey,
-            note: usesEPA ? 'EPA factored into avgMatchScore' : 'Pure scouted data',
-          });
-          
-          totalAverage += stats.avgMatchScore;
-          totalConfidence += confidence;
-          validTeams++;
-        } else {
-          console.warn(`⚠️ Team ${teamNumber} stats NOT found - no scouted data AND no EPA available. This team will be excluded from alliance average.`);
-        }
-      });
-
-      const average = validTeams > 0 ? totalAverage / validTeams : 0;
-      const confidence = validTeams > 0 ? totalConfidence / validTeams : 0.0;
-
-      console.log('📊 Alliance Averages Result:', {
-        teams,
-        validTeams,
-        average: average.toFixed(2),
-        confidence: confidence.toFixed(2),
-        note: validTeams < teams.length 
-          ? `⚠️ ${teams.length - validTeams} team(s) excluded (no data available)` 
-          : '✅ All teams included',
-        epaIncluded: teamStatsArray.some(t => t.usesEPA) ? 'Yes - EPA factored into averages' : 'No - All teams have sufficient scouted data',
-      });
-
-      return {
-        teams,
-        average,
-        confidence,
-      };
+      return this.buildAllianceDataFromStats(teams, teamStats);
     } catch (error) {
       console.error('Error calculating alliance averages:', error);
-      return { teams, average: 0, confidence: 0.0 };
+      return { teams, average: 0, confidence: 0.0, stdDev: 0, teamsWithValidData: 0 };
     }
   }
 
@@ -254,15 +319,6 @@ class BettingService {
     blueConf: number,
     matchConf: number
   ): { redWinProb: number; blueWinProb: number; redOdds: number; blueOdds: number } {
-    console.log(`🎲 [WIN PROB] Calculating winner odds:`, {
-      redAvg: redAvg.toFixed(2),
-      blueAvg: blueAvg.toFixed(2),
-      scoreDifference: (redAvg - blueAvg).toFixed(2),
-      redConf: redConf.toFixed(2),
-      blueConf: blueConf.toFixed(2),
-      matchConf: matchConf.toFixed(2),
-    });
-    
     // Calculate data-driven win probability
     let redWinProbData = 0.5; // Default 50/50
 
@@ -280,38 +336,16 @@ class BettingService {
       
       // Clamp to [0.2, 0.8] for safety
       redWinProbData = Math.max(0.2, Math.min(0.8, redWinProbData));
-      
-      console.log(`🎲 [WIN PROB] Both alliances have data (contribution-based):`, {
-        redAvg: redAvg.toFixed(2),
-        blueAvg: blueAvg.toFixed(2),
-        totalScore: totalScore.toFixed(2),
-        redContribution: `${(redContribution * 100).toFixed(1)}%`,
-        blueContribution: `${(blueContribution * 100).toFixed(1)}%`,
-        rawProb: redWinProbData.toFixed(3),
-        clampedProb: redWinProbData.toFixed(3),
-        explanation: `Using raw contribution: Red ${(redContribution * 100).toFixed(1)}% contribution = ${(redWinProbData * 100).toFixed(1)}% win probability`,
-      });
     } else if (redAvg > 0 && blueAvg === 0) {
       // Only red has data
       redWinProbData = 0.5 + (redAvg / 200) * redConf;
       redWinProbData = Math.max(0.3, Math.min(0.7, redWinProbData));
-      console.log(`🎲 [WIN PROB] Only red has data:`, {
-        redAvg: redAvg.toFixed(2),
-        redConf: redConf.toFixed(2),
-        prob: redWinProbData.toFixed(3),
-      });
     } else if (redAvg === 0 && blueAvg > 0) {
       // Only blue has data
       redWinProbData = 0.5 - (blueAvg / 200) * blueConf;
       redWinProbData = Math.max(0.3, Math.min(0.7, redWinProbData));
-      console.log(`🎲 [WIN PROB] Only blue has data:`, {
-        blueAvg: blueAvg.toFixed(2),
-        blueConf: blueConf.toFixed(2),
-        prob: redWinProbData.toFixed(3),
-      });
-    } else {
-      console.log(`🎲 [WIN PROB] No data for either alliance, using 50/50`);
     }
+
 
     // Blend with neutral (50/50) based on match confidence
     // Reduced impact: even low confidence has minimal blending toward 50/50
@@ -320,16 +354,6 @@ class BettingService {
     const dataWeight = 1 - neutralWeight;
     const finalRedWinProb = (0.5 * neutralWeight) + (redWinProbData * dataWeight);
     const finalBlueWinProb = 1 - finalRedWinProb;
-
-    console.log(`🎲 [WIN PROB] Final probabilities after confidence blending:`, {
-      dataDrivenProb: redWinProbData.toFixed(3),
-      matchConfidence: matchConf.toFixed(3),
-      neutralWeight: `${(neutralWeight * 100).toFixed(1)}%`,
-      dataWeight: `${(dataWeight * 100).toFixed(1)}%`,
-      finalRedProb: finalRedWinProb.toFixed(3),
-      finalBlueProb: finalBlueWinProb.toFixed(3),
-      explanation: `Blended ${(dataWeight * 100).toFixed(1)}% data-driven + ${(neutralWeight * 100).toFixed(1)}% neutral (50/50)`,
-    });
 
     // Calculate odds
     let redOdds = 1 / finalRedWinProb;
@@ -343,11 +367,6 @@ class BettingService {
     redOdds = Math.max(1.1, Math.min(10.0, redOdds));
     blueOdds = Math.max(1.1, Math.min(10.0, blueOdds));
 
-    console.log(`🎲 [WIN PROB] Final odds:`, {
-      redOdds: redOdds.toFixed(2),
-      blueOdds: blueOdds.toFixed(2),
-    });
-
     return {
       redWinProb: finalRedWinProb,
       blueWinProb: finalBlueWinProb,
@@ -356,142 +375,240 @@ class BettingService {
     };
   }
 
+  /** Legacy margin ranges (for resolving old bets) */
+  static readonly MARGIN_RANGES: Array<{ rangeKey: string; minMult: number; maxMult: number | null }> = [
+    { rangeKey: '0-0.5', minMult: 0, maxMult: 0.5 },
+    { rangeKey: '0.5-0.75', minMult: 0.5, maxMult: 0.75 },
+    { rangeKey: '0.75-1', minMult: 0.75, maxMult: 1 },
+    { rangeKey: '1-1.25', minMult: 1, maxMult: 1.25 },
+    { rangeKey: '1.25-1.5', minMult: 1.25, maxMult: 1.5 },
+    { rangeKey: '1.5+', minMult: 1.5, maxMult: null },
+  ];
+
+  /** Mean bucket: ±(0.75–1)σ, using 0.85σ (midpoint of 0.05 increments) */
+  private static readonly MEAN_SIGMA = 0.85;
+  /** 1above/1below outer bound: 1.75–2.25σ, using 2.0σ */
+  private static readonly OUTER_SIGMA = 2.0;
+
   /**
-   * Calculate margin bet odds
+   * Get margin options (stdev-based) for an alliance.
+   * Mean bucket: mean ± 0.85σ (or one-sided if other side goes below 0).
+   * 1above: mean+0.85σ to mean+2σ. 1below: mean-2σ to mean-0.85σ.
+   * 2above/2below removed. Excludes options that go below 0 except mean one-sided case.
+   */
+  getMarginOptions(
+    expectedMargin: number,
+    marginStd: number,
+    alliance: 'red' | 'blue'
+  ): Array<{ rangeKey: string; lowerBound: number | null; upperBound: number | null; label: string }> {
+    if (expectedMargin <= 0 || marginStd <= 0) return [];
+    const mean = alliance === 'red' ? expectedMargin : -expectedMargin;
+    const ms = BettingService.MEAN_SIGMA;
+    const os = BettingService.OUTER_SIGMA;
+
+    // Mean bucket: mean ± 0.85σ. Special case: if mean - 0.85σ < 0 (Red) or mean + 0.85σ > 0 (Blue), use one-sided only.
+    let meanLower: number | null;
+    let meanUpper: number | null;
+    if (alliance === 'red' && mean - ms * marginStd < 0) {
+      meanLower = mean;
+      meanUpper = mean + ms * marginStd;
+    } else if (alliance === 'blue' && mean + ms * marginStd > 0) {
+      meanLower = mean - ms * marginStd;
+      meanUpper = mean;
+    } else {
+      meanLower = mean - ms * marginStd;
+      meanUpper = mean + ms * marginStd;
+    }
+
+    const options: Array<{ rangeKey: string; lowerBound: number | null; upperBound: number | null }> = [
+      { rangeKey: '1above', lowerBound: mean + ms * marginStd, upperBound: mean + os * marginStd },
+      { rangeKey: 'mean', lowerBound: meanLower, upperBound: meanUpper },
+      { rangeKey: '1below', lowerBound: mean - os * marginStd, upperBound: mean - ms * marginStd },
+    ];
+
+    const filtered = options.filter((opt) => {
+      const minVal = opt.lowerBound ?? -1e9;
+      const maxVal = opt.upperBound ?? 1e9;
+      if (alliance === 'red') return minVal >= 0;
+      return maxVal <= 0;
+    });
+
+    return filtered.map((opt) => {
+      const lo = opt.lowerBound;
+      const hi = opt.upperBound;
+      let label: string;
+      if (hi === null && lo !== null) {
+        label = `${Math.round(Math.abs(lo))}+ pts`;
+      } else if (lo === null && hi !== null) {
+        label = `${Math.round(Math.abs(hi))}+ pts`;
+      } else if (lo !== null && hi !== null) {
+        const a = Math.round(Math.abs(lo));
+        const b = Math.round(Math.abs(hi));
+        label = `${Math.min(a, b)}-${Math.max(a, b)} pts`;
+      } else {
+        label = '';
+      }
+      return { ...opt, label };
+    });
+  }
+
+  /**
+   * Calculate margin bet odds using normal distribution (stdev-based ranges).
    */
   calculateMarginOdds(
     expectedMargin: number,
-    marginThreshold: number,
+    rangeKey: string,
     alliance: 'red' | 'blue',
-    redAvg: number,
-    blueAvg: number,
-    matchConf: number
+    marginStd: number,
+    matchConf: number,
+    lowerBound?: number | null,
+    upperBound?: number | null
   ): number {
-    let dataProb = 0.5;
+    const opts = this.getMarginOptions(expectedMargin, marginStd, alliance);
+    const opt = opts.find((o) => o.rangeKey === rangeKey);
+    const lower = lowerBound !== undefined ? lowerBound : opt?.lowerBound ?? 0;
+    const upper = upperBound !== undefined ? upperBound : opt?.upperBound;
 
-    // Determine if the selected alliance is expected to win
-    const redWins = redAvg > blueAvg;
-    const selectedAllianceWins = alliance === 'red' ? redWins : !redWins;
-    
-    // Calculate probability based on margin
-    if (expectedMargin >= marginThreshold) {
-      // Expected margin is above threshold
-      if (selectedAllianceWins) {
-        // Selected alliance is expected to win by this margin → higher probability
-        dataProb = 0.5 + Math.min(0.3, (expectedMargin - marginThreshold) / 20);
-      } else {
-        // Selected alliance is NOT expected to win → lower probability (better odds)
-        dataProb = 0.5 - Math.min(0.3, (expectedMargin - marginThreshold) / 20);
-      }
+    if (expectedMargin <= 0 || marginStd <= 0) return 2.0;
+
+    const signedMean = alliance === 'red' ? expectedMargin : -expectedMargin;
+
+    let dataProb: number;
+    if (upper == null && lower != null && typeof lower === 'number') {
+      dataProb = 1 - normalCDF(lower, signedMean, marginStd);
+    } else if (lower == null && upper != null && typeof upper === 'number') {
+      dataProb = normalCDF(upper, signedMean, marginStd);
+    } else if (lower != null && upper != null && typeof lower === 'number' && typeof upper === 'number') {
+      dataProb = normalCDFRange(Math.min(lower, upper), Math.max(lower, upper), signedMean, marginStd);
     } else {
-      // Expected margin is below threshold
-      if (selectedAllianceWins) {
-        // Selected alliance wins but by less than threshold → lower probability
-        dataProb = 0.5 - Math.min(0.3, (marginThreshold - expectedMargin) / 20);
-      } else {
-        // Selected alliance doesn't win → much lower probability (better odds)
-        dataProb = 0.5 - Math.min(0.4, (marginThreshold - expectedMargin) / 15);
-      }
+      return 2.0;
     }
 
-    // Clamp to [0.2, 0.8]
-    dataProb = Math.max(0.2, Math.min(0.8, dataProb));
-
-    // Blend with neutral (50/50) based on match confidence
-    // Reduced impact: even low confidence has minimal blending toward 50/50
-    const neutralWeight = (1 - matchConf) * 0.1; // Max 10% blending even at confidence 0
+    dataProb = Math.max(0.05, Math.min(0.95, dataProb));
+    const neutralWeight = (1 - matchConf) * 0.1;
     const dataWeight = 1 - neutralWeight;
     const finalProb = (0.5 * neutralWeight) + (dataProb * dataWeight);
     const clampedProb = Math.max(0.1, Math.min(0.9, finalProb));
-
-    // Calculate odds
     let odds = 1 / clampedProb;
     odds = Math.round(odds * 100) / 100;
-    
-    // Ensure minimum odds of 1.1 and maximum of 20.0
     return Math.max(1.1, Math.min(20.0, odds));
   }
 
   /**
-   * Calculate over/under odds
-   * @param expectedTotal - Expected combined score for the match
-   * @param threshold - The threshold to bet over/under
-   * @param overUnder - 'over' or 'under' direction of the bet
-   * @param matchConf - Match confidence (0-1)
-   * @param leagueAvg - Optional league average data
+   * Get over/under options using same distribution constants as margin (MEAN_SIGMA, OUTER_SIGMA).
+   * Rows: outer (±2σ), middle (±0.85σ), center (mean).
+   * Excludes options where threshold < 0.
+   */
+  getOverUnderOptions(
+    expectedTotal: number,
+    totalStd: number
+  ): Array<{ over: { threshold: number; label: string } | null; under: { threshold: number; label: string } | null }> {
+    if (expectedTotal <= 0 || totalStd <= 0) return [];
+    const ms = BettingService.MEAN_SIGMA;
+    const os = BettingService.OUTER_SIGMA;
+    const overOuter = Math.round(expectedTotal + os * totalStd);
+    const overMiddle = Math.round(expectedTotal + ms * totalStd);
+    const mean = Math.round(expectedTotal);
+    const underMiddle = Math.round(expectedTotal - ms * totalStd);
+    const underOuter = Math.round(expectedTotal - os * totalStd);
+    return [
+      {
+        over: overOuter >= 0 ? { threshold: overOuter, label: `Over ${overOuter}` } : null,
+        under: underOuter >= 0 ? { threshold: underOuter, label: `Under ${underOuter}` } : null,
+      },
+      {
+        over: overMiddle >= 0 ? { threshold: overMiddle, label: `Over ${overMiddle}` } : null,
+        under: underMiddle >= 0 ? { threshold: underMiddle, label: `Under ${underMiddle}` } : null,
+      },
+      {
+        over: mean >= 0 ? { threshold: mean, label: `Over ${mean}` } : null,
+        under: mean >= 0 ? { threshold: mean, label: `Under ${mean}` } : null,
+      },
+    ];
+  }
+
+  /**
+   * Calculate over/under odds using normal distribution.
+   * Total ~ N(expectedTotal, totalStd)
    */
   calculateOverUnderOdds(
     expectedTotal: number,
     threshold: number,
     overUnder: 'over' | 'under',
     matchConf: number,
+    totalStd: number,
     leagueAvg?: LeagueAverage
   ): number {
     let dataProb = 0.5;
 
-    if (expectedTotal > 0) {
-      // Calculate base probability based on how far expectedTotal is from threshold
-      const difference = expectedTotal - threshold;
-      const normalizedDiff = Math.min(30, Math.abs(difference)); // Cap at 30 points
-      
+    if (expectedTotal > 0 && totalStd > 0) {
       if (overUnder === 'over') {
-        // Betting "over": 
-        // - If expectedTotal > threshold: "over" is more likely → higher probability → lower odds
-        // - If expectedTotal < threshold: "over" is less likely → lower probability → higher odds
-        if (expectedTotal > threshold) {
-          // Expected is above threshold, so "over" is more likely → higher probability (lower odds)
-          dataProb = 0.5 + Math.min(0.3, normalizedDiff / 30);
-        } else {
-          // Expected is below threshold, so "over" is less likely → lower probability (higher odds)
-          dataProb = 0.5 - Math.min(0.3, normalizedDiff / 30);
-        }
+        dataProb = 1 - normalCDF(threshold, expectedTotal, totalStd);
       } else {
-        // Betting "under":
-        // - If expectedTotal > threshold: "under" is less likely → lower probability → higher odds
-        // - If expectedTotal < threshold: "under" is more likely → higher probability → lower odds
-        if (expectedTotal > threshold) {
-          // Expected is above threshold, so "under" is less likely → lower probability (higher odds)
-          dataProb = 0.5 - Math.min(0.3, normalizedDiff / 30);
-        } else {
-          // Expected is below threshold, so "under" is more likely → higher probability (lower odds)
-          dataProb = 0.5 + Math.min(0.3, normalizedDiff / 30);
-        }
+        dataProb = normalCDF(threshold, expectedTotal, totalStd);
       }
-      
-      dataProb = Math.max(0.2, Math.min(0.8, dataProb));
+      dataProb = Math.max(0.05, Math.min(0.95, dataProb));
     }
 
-    // Blend with neutral (50/50) based on match confidence
-    // Reduced impact: even low confidence has minimal blending toward 50/50
-    const neutralWeight = (1 - matchConf) * 0.1; // Max 10% blending even at confidence 0
+    const neutralWeight = (1 - matchConf) * 0.1;
     const dataWeight = 1 - neutralWeight;
     const finalProb = (0.5 * neutralWeight) + (dataProb * dataWeight);
     const clampedProb = Math.max(0.1, Math.min(0.9, finalProb));
 
-    // Calculate odds
     let odds = 1 / clampedProb;
     odds = Math.round(odds * 100) / 100;
-    
-    // Ensure minimum odds of 1.1 and maximum of 10.0
     return Math.max(1.1, Math.min(10.0, odds));
   }
 
   /**
-   * Calculate all match odds
+   * Calculate all match odds. Uses cache for instant reopen of same match.
    */
   async calculateMatchOdds(
     redTeams: number[],
     blueTeams: number[],
+    eventKey: string,
+    matchKey?: string
+  ): Promise<MatchOdds> {
+    const cacheKey = this.getOddsCacheKey(redTeams, blueTeams, eventKey, matchKey);
+    const now = Date.now();
+
+    const cached = this.oddsCache.get(cacheKey);
+    if (cached && now - cached.fetchedAt < ODDS_CACHE_TTL_MS) {
+      return cached.odds;
+    }
+
+    const inFlight = this.oddsInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = this.computeMatchOdds(redTeams, blueTeams, eventKey);
+    this.oddsInFlight.set(cacheKey, promise);
+    try {
+      const odds = await promise;
+      this.oddsCache.set(cacheKey, { odds, fetchedAt: now });
+      return odds;
+    } finally {
+      this.oddsInFlight.delete(cacheKey);
+    }
+  }
+
+  private async computeMatchOdds(
+    redTeams: number[],
+    blueTeams: number[],
     eventKey: string
   ): Promise<MatchOdds> {
-    // Get alliance data
-    const redAlliance = await this.calculateAllianceAverages(redTeams, eventKey);
-    const blueAlliance = await this.calculateAllianceAverages(blueTeams, eventKey);
+    await teamStatisticsService.refreshTeamStatistics();
+    const allTeams = [...redTeams, ...blueTeams];
+    const [allStats, leagueAverage] = await Promise.all([
+      teamStatisticsService.getTeamStatisticsBatch(allTeams, eventKey),
+      this.getLeagueAverage(eventKey),
+    ]);
 
-    // Calculate match confidence
+    const redAlliance = this.buildAllianceDataFromStats(redTeams, allStats);
+    const blueAlliance = this.buildAllianceDataFromStats(blueTeams, allStats);
+
     const matchConf = this.calculateMatchConfidence(redAlliance.confidence, blueAlliance.confidence);
-
-    // Calculate winner odds
     const winnerOdds = this.calculateWinnerOdds(
       redAlliance.average,
       blueAlliance.average,
@@ -500,46 +617,24 @@ class BettingService {
       matchConf
     );
 
-    // Calculate expected margin and total SEPARATELY
-    // Expected margin = absolute difference between alliance averages (spread)
+    const redOk = redAlliance.teamsWithValidData >= 2;
+    const blueOk = blueAlliance.teamsWithValidData >= 2;
+    if (!redOk || !blueOk) {
+      throw new Error('Insufficient data for odds: need at least 2 teams with data per alliance');
+    }
+
     const redAvg = redAlliance.average;
     const blueAvg = blueAlliance.average;
     const expectedMargin = Math.abs(redAvg - blueAvg);
-    
-    // Expected total = sum of alliance averages (combined score)
     const expectedTotal = redAvg + blueAvg;
 
-    // Validation: These should NEVER be the same unless one alliance is 0
-    if (expectedMargin === expectedTotal && expectedTotal > 0) {
-      console.warn('⚠️ Expected margin equals expected total!', {
-        redAvg,
-        blueAvg,
-        expectedMargin,
-        expectedTotal,
-        redTeams,
-        blueTeams,
-      });
+    const redVar = (redAlliance.stdDev ?? 0) ** 2;
+    const blueVar = (blueAlliance.stdDev ?? 0) ** 2;
+    const marginStd = Math.sqrt(redVar + blueVar);
+    const totalStd = Math.sqrt(redVar + blueVar);
+    if (marginStd <= 0 || totalStd <= 0) {
+      throw new Error('Insufficient data for odds: no valid stdev');
     }
-
-    // Log for debugging
-    console.log('📊 Match Odds Calculation:', {
-      redAvg: redAvg.toFixed(2),
-      blueAvg: blueAvg.toFixed(2),
-      scoreDifference: (redAvg - blueAvg).toFixed(2),
-      expectedMargin: expectedMargin.toFixed(2),
-      expectedTotal: expectedTotal.toFixed(2),
-      redConfidence: redAlliance.confidence.toFixed(2),
-      blueConfidence: blueAlliance.confidence.toFixed(2),
-      matchConfidence: matchConf.toFixed(2),
-      calculation: {
-        margin: `|${redAvg.toFixed(2)} - ${blueAvg.toFixed(2)}| = ${expectedMargin.toFixed(2)}`,
-        total: `${redAvg.toFixed(2)} + ${blueAvg.toFixed(2)} = ${expectedTotal.toFixed(2)}`,
-      },
-      note: redAvg === 0 || blueAvg === 0 ? '⚠️ One or both alliances have 0 average - may be using EPA or no data' : '✅ Both alliances have data',
-    });
-
-    // Get league average if threshold is met
-    const leagueAverage = await this.getLeagueAverage(eventKey);
 
     return {
       redWinProbability: winnerOdds.redWinProb,
@@ -552,6 +647,8 @@ class BettingService {
       leagueAverage: leagueAverage || undefined,
       redAverage: redAvg,
       blueAverage: blueAvg,
+      marginStd,
+      totalStd,
     };
   }
 
@@ -764,9 +861,10 @@ class BettingService {
   }
 
   /**
-   * Check and resolve bets for a match
+   * Check and resolve bets for a match.
+   * Returns resolutions for the current user (for notifications).
    */
-  async checkAndResolveBets(matchKey: string): Promise<void> {
+  async checkAndResolveBets(matchKey: string): Promise<Array<{ matchNumber: number; won: boolean; payout: number }>> {
     try {
       console.log(`[Betting] Checking bets for match: ${matchKey}`);
       
@@ -775,21 +873,21 @@ class BettingService {
       
       if (!matchResult) {
         console.log(`[Betting] No match data found for: ${matchKey}`);
-        return; // Match not found
+        return [];
       }
       
       // Check if match has been played - winning_alliance must be 'red' or 'blue'
       const winningAlliance = matchResult.winning_alliance;
       if (!winningAlliance || (winningAlliance !== 'red' && winningAlliance !== 'blue')) {
         console.log(`[Betting] Match ${matchKey} not completed yet. winning_alliance: ${winningAlliance}`);
-        return; // Match not completed yet
+        return [];
       }
       
       // Verify we have actual score data, not just a winning alliance
       const scoreBreakdown = matchResult.score_breakdown;
       if (!scoreBreakdown || !scoreBreakdown.red || !scoreBreakdown.blue) {
         console.log(`[Betting] Match ${matchKey} missing score breakdown. Cannot resolve bets.`);
-        return; // No score breakdown means match likely not completed
+        return [];
       }
 
       // Get all pending bets for this match
@@ -801,12 +899,12 @@ class BettingService {
 
       if (error || !bets) {
         console.error('Error fetching bets for resolution:', error);
-        return;
+        return [];
       }
-      
+
       if (bets.length === 0) {
         console.log(`[Betting] No pending bets for match: ${matchKey}`);
-        return;
+        return [];
       }
 
       // Get match scores - use score or totalPoints depending on TBA response format
@@ -819,7 +917,8 @@ class BettingService {
       console.log(`[Betting] Match ${matchKey} results: Red ${redScore} - Blue ${blueScore}, Winner: ${winningAlliance}`);
 
       // Compute all bet outcomes in memory (no DB calls)
-      const resolutions: Array<{ id: string; status: 'won' | 'lost'; payout: number; user_identifier: string }> = [];
+      const resolutions: Array<{ id: string; status: 'won' | 'lost'; payout: number; user_identifier: string; match_number: number }> = [];
+      const userIdentifier = await this.getUserIdentifier();
 
       for (const bet of bets) {
         let won = false;
@@ -849,36 +948,55 @@ class BettingService {
             }
             break;
 
-          case 'margin':
-            const betMargin = bet.bet_details?.margin;
+          case 'margin': {
             const marginBetAlliance = bet.bet_details?.alliance;
-            if (betMargin !== undefined) {
-              const actualWinner = redScore > blueScore ? 'red' : 'blue';
-              const marginDifference = margin - betMargin;
-              
-              // Check if the correct alliance won AND margin is met
-              if (marginBetAlliance === actualWinner && margin >= betMargin) {
+            const actualWinner = redScore > blueScore ? 'red' : 'blue';
+            const signedMargin = redScore - blueScore;
+
+            // New format: stdev-based (lowerBound, upperBound in points, margin = Red - Blue)
+            const lowerBound = bet.bet_details?.lowerBound;
+            const upperBound = bet.bet_details?.upperBound;
+            if (lowerBound != null || upperBound != null) {
+              const lo = lowerBound ?? -Infinity;
+              const hi = upperBound ?? Infinity;
+              const inRange = signedMargin >= lo && signedMargin <= hi;
+              if (marginBetAlliance === actualWinner && inRange) {
                 won = true;
                 payout = Math.round(bet.bet_amount * parseFloat(bet.odds));
-                console.log(`[Betting] Margin bet WON - Bet ID: ${bet.id}`);
-                console.log(`  Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}`);
-                console.log(`  Actual margin: ${margin} points (Red: ${redScore}, Blue: ${blueScore})`);
-                console.log(`  Bet threshold: ${betMargin} points`);
-                console.log(`  Won by: ${marginDifference.toFixed(1)} points`);
-                console.log(`  Payout: ${payout} ebucks (${bet.bet_amount} × ${bet.odds})`);
+                console.log(`[Betting] Margin range bet WON - Bet ID: ${bet.id}`);
               } else {
-                console.log(`[Betting] Margin bet LOST - Bet ID: ${bet.id}`);
-                console.log(`  Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}`);
-                console.log(`  Actual margin: ${margin} points (Red: ${redScore}, Blue: ${blueScore})`);
-                console.log(`  Bet threshold: ${betMargin} points`);
-                if (marginBetAlliance !== actualWinner) {
-                  console.log(`  Lost: Wrong alliance won`);
+                console.log(`[Betting] Margin range bet LOST - Bet ID: ${bet.id}`);
+              }
+            } else if (bet.bet_details?.marginRange !== undefined && bet.bet_details?.expectedMarginAtBet !== undefined) {
+              // Legacy percentage-based format
+              const marginRange = bet.bet_details.marginRange;
+              const expectedMarginAtBet = bet.bet_details.expectedMarginAtBet;
+              const range = BettingService.MARGIN_RANGES.find((r) => r.rangeKey === marginRange);
+              if (range) {
+                const minMargin = expectedMarginAtBet * range.minMult;
+                const maxMargin = range.maxMult === null ? Infinity : expectedMarginAtBet * range.maxMult;
+                const allianceMargin = marginBetAlliance === 'red' ? signedMargin : -signedMargin;
+                const inRange = allianceMargin >= minMargin && (range.maxMult === null || allianceMargin < maxMargin);
+                if (marginBetAlliance === actualWinner && inRange) {
+                  won = true;
+                  payout = Math.round(bet.bet_amount * parseFloat(bet.odds));
+                }
+              }
+            } else {
+              // Legacy format: threshold-based (margin as number)
+              const betMargin = bet.bet_details?.margin;
+              if (betMargin !== undefined) {
+                if (marginBetAlliance === actualWinner && margin >= betMargin) {
+                  won = true;
+                  payout = Math.round(bet.bet_amount * parseFloat(bet.odds));
+                  console.log(`[Betting] Margin bet WON - Bet ID: ${bet.id}`);
                 } else {
-                  console.log(`  Missed by: ${Math.abs(marginDifference).toFixed(1)} points`);
+                  console.log(`[Betting] Margin bet LOST - Bet ID: ${bet.id}`);
                 }
               }
             }
             break;
+          }
 
           case 'over_under':
             const threshold = bet.bet_details?.threshold;
@@ -948,17 +1066,29 @@ class BettingService {
                 betWon = (alliance === 'red' && redWon) || (alliance === 'blue' && !redWon);
                 console.log(`  Winner bet: ${betWon ? 'WON' : 'LOST'} - Bet on ${alliance}, actual winner: ${winningAlliance}`);
               } else if (parlayBet.type === 'margin') {
-                const marginThreshold = parlayBet.details?.margin;
                 const marginBetAlliance = parlayBet.details?.alliance;
                 const actualWinner = redScore > blueScore ? 'red' : 'blue';
-                betWon = marginThreshold !== undefined && 
-                         marginBetAlliance === actualWinner && 
-                         margin >= marginThreshold;
-                if (marginThreshold !== undefined) {
-                  console.log(`  Margin bet: ${betWon ? 'WON' : 'LOST'} - Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}, Actual margin: ${margin}, threshold: ${marginThreshold}`);
+                const signedMargin = redScore - blueScore;
+
+                const lowerBound = parlayBet.details?.lowerBound;
+                const upperBound = parlayBet.details?.upperBound;
+                if (lowerBound != null || upperBound != null) {
+                  const lo = lowerBound ?? -Infinity;
+                  const hi = upperBound ?? Infinity;
+                  betWon = marginBetAlliance === actualWinner && signedMargin >= lo && signedMargin <= hi;
+                } else if (parlayBet.details?.marginRange && parlayBet.details?.expectedMarginAtBet) {
+                  const range = BettingService.MARGIN_RANGES.find(r => r.rangeKey === parlayBet.details.marginRange);
+                  if (range) {
+                    const minMargin = parlayBet.details.expectedMarginAtBet * range.minMult;
+                    const maxMargin = range.maxMult === null ? Infinity : parlayBet.details.expectedMarginAtBet * range.maxMult;
+                    const allianceMargin = marginBetAlliance === 'red' ? signedMargin : -signedMargin;
+                    betWon = marginBetAlliance === actualWinner && allianceMargin >= minMargin && (range.maxMult === null || allianceMargin < maxMargin);
+                  }
                 } else {
-                  console.log(`  Margin bet: LOST - No margin threshold in details`);
+                  const marginThreshold = parlayBet.details?.margin;
+                  betWon = marginThreshold !== undefined && marginBetAlliance === actualWinner && margin >= marginThreshold;
                 }
+                console.log(`  Margin bet: ${betWon ? 'WON' : 'LOST'} - Bet alliance: ${marginBetAlliance}, Actual winner: ${actualWinner}, Actual margin: ${margin}`);
               } else if (parlayBet.type === 'over_under') {
                 const threshold = parlayBet.details?.threshold;
                 const overUnder = parlayBet.details?.overUnder || parlayBet.details?.over_under; // Support both formats
@@ -995,6 +1125,7 @@ class BettingService {
           status: won ? 'won' : 'lost',
           payout,
           user_identifier: bet.user_identifier,
+          match_number: bet.match_number ?? 0,
         });
         console.log(`[Betting] Resolved bet ${bet.id}: ${won ? 'WON' : 'LOST'}, payout: ${payout}`);
       }
@@ -1002,15 +1133,28 @@ class BettingService {
       // Batch resolve all bets in one RPC call (eliminates N+1)
       if (resolutions.length > 0) {
         const { error } = await supabase.rpc('resolve_bets_batch', {
-          resolutions,
+          resolutions: resolutions.map(({ id, status, payout, user_identifier }) => ({
+            id,
+            status,
+            payout,
+            user_identifier,
+          })),
         });
         if (error) {
           console.error('[Betting] Error batch resolving bets:', error);
         }
       }
+
+      // Return resolutions for current user (for notification)
+      if (userIdentifier) {
+        return resolutions
+          .filter((r) => r.user_identifier === userIdentifier)
+          .map((r) => ({ matchNumber: r.match_number, won: r.status === 'won', payout: r.payout }));
+      }
     } catch (error) {
       console.error('Error checking and resolving bets:', error);
     }
+    return [];
   }
 }
 

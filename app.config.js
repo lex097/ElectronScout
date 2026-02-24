@@ -12,7 +12,7 @@ export default {
     },
     name: "ElectronScout",
     slug: "electronscout",
-    version: "1.1.1",
+    version: "1.1.2",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "electronscout",

@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BettingModal from '../components/betting/BettingModal';
+import { bettingService } from '../services/bettingService';
 
 export default function SelectTeamScreen() {
   const params = useLocalSearchParams<{
@@ -24,6 +26,7 @@ export default function SelectTeamScreen() {
   const { matchKey, matchNumber, compLevel, eventKey } = params;
 
   const [bettingModalVisible, setBettingModalVisible] = useState(false);
+  const [bettingAllowed, setBettingAllowed] = useState<boolean | null>(null);
   const borderOpacity = useRef(new Animated.Value(0.3)).current;
 
   // Fetch matches to get the specific match
@@ -53,6 +56,29 @@ export default function SelectTeamScreen() {
     return matches.find((m) => m.key === matchKey);
   }, [matches, matchKey]);
 
+  const redTeams = match ? match.alliances.red.team_keys.map((key) => parseInt(key.replace('frc', ''), 10)) : [];
+  const blueTeams = match ? match.alliances.blue.team_keys.map((key) => parseInt(key.replace('frc', ''), 10)) : [];
+
+  useEffect(() => {
+    if (!eventKey || redTeams.length === 0 || blueTeams.length === 0) {
+      setBettingAllowed(false);
+      return;
+    }
+    let cancelled = false;
+    setBettingAllowed(null);
+    bettingService
+      .checkBettingEligibility(redTeams, blueTeams, eventKey, match?.key)
+      .then(({ canBet }) => {
+        if (!cancelled) setBettingAllowed(canBet);
+      })
+      .catch(() => {
+        if (!cancelled) setBettingAllowed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventKey, match?.key, redTeams.join(','), blueTeams.join(',')]);
+
   const handleSelectTeam = async (teamNumber: number) => {
     const teamNumStr = teamNumber.toString();
     // Persist selection so index screen can load it even if params don't pass through
@@ -79,13 +105,6 @@ export default function SelectTeamScreen() {
     );
   }
 
-  const redTeams = match.alliances.red.team_keys.map((key) =>
-    parseInt(key.replace('frc', ''), 10)
-  );
-  const blueTeams = match.alliances.blue.team_keys.map((key) =>
-    parseInt(key.replace('frc', ''), 10)
-  );
-
   const getCompLevelLabel = (level: string) => {
     const labels: Record<string, string> = {
       qm: 'Qualification',
@@ -109,12 +128,25 @@ export default function SelectTeamScreen() {
         {/* Place Bet Button */}
         <TouchableOpacity
           style={styles.betButton}
-          onPress={() => setBettingModalVisible(true)}
+          onPress={() => {
+            if (bettingAllowed !== true) {
+              Alert.alert(
+                'Insufficient Data',
+                'There is insufficient data for accurate odds for betting. Need at least 2 teams with data (manually scouted or Statbotics) per alliance.',
+                [{ text: 'OK' }]
+              );
+              return;
+            }
+            bettingService.preloadOdds(redTeams, blueTeams, eventKey, match.key);
+            setBettingModalVisible(true);
+          }}
           activeOpacity={0.8}
+          disabled={bettingAllowed === null}
         >
           <Animated.View
             style={[
               styles.betButtonInner,
+              bettingAllowed === false && styles.betButtonDisabled,
               {
                 shadowOpacity: borderOpacity.interpolate({
                   inputRange: [0.5, 1],
@@ -123,7 +155,11 @@ export default function SelectTeamScreen() {
               },
             ]}
           >
-            <Text style={styles.betButtonText}>Place Bet</Text>
+            {bettingAllowed === null ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.betButtonText}>Place Bet</Text>
+            )}
           </Animated.View>
         </TouchableOpacity>
 
@@ -237,6 +273,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  betButtonDisabled: {
+    opacity: 0.5,
+    borderColor: '#666',
   },
   allianceSection: {
     marginBottom: 24,

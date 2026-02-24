@@ -10,6 +10,7 @@ import { ACTIVE_GAME_CONFIG, getDefaultsForPhases, getInitialMatchData, Metric }
 import { bettingService } from '../../services/bettingService';
 import { db } from '../../services/database';
 import { useAuthStore } from '../../stores/authStore';
+import { useBetNotificationStore } from '../../stores/betNotificationStore';
 import { EARNED_PER_MATCH, useEbucksStore } from '../../stores/ebucksStore';
 import { MatchData } from '../../types/match';
 
@@ -61,6 +62,7 @@ export default function MatchScoutScreen() {
   const getScoutName = useAuthStore((state) => state.getScoutName);
   const earnEbucks = useEbucksStore((state) => state.earnEbucks);
   const refreshBalance = useEbucksStore((state) => state.refreshBalance);
+  const showBetNotification = useBetNotificationStore((state) => state.showNotification);
 
   const currentPhase = ACTIVE_GAME_CONFIG.phases[currentPhaseIndex];
   const autonomousPhase = ACTIVE_GAME_CONFIG.phases.find(p => p.id === 'auto');
@@ -608,10 +610,12 @@ export default function MatchScoutScreen() {
           const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
           if (matchKey) {
             console.log(`[Betting] Checking bets for match after scouting: ${matchKey}`);
-            // Check and resolve bets for this match
-            await bettingService.checkAndResolveBets(matchKey);
-            // Refresh balance to show any winnings
+            const resolutions = await bettingService.checkAndResolveBets(matchKey);
             await refreshBalance();
+            const first = resolutions?.[0];
+            if (first) {
+              showBetNotification({ matchNumber: first.matchNumber, won: first.won, payout: first.payout });
+            }
           }
         } catch (error) {
           console.error('Error checking/resolving bets after match save:', error);

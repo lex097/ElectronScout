@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bet, bettingService } from '../../services/bettingService';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
+import { useBetNotificationStore } from '../../stores/betNotificationStore';
 import { useEbucksStore } from '../../stores/ebucksStore';
 
 interface LeaderboardEntry {
@@ -35,6 +36,7 @@ export default function BettingHistoryScreen() {
   const balance = useEbucksStore((state) => state.balance);
   const refreshBalance = useEbucksStore((state) => state.refreshBalance);
   const user = useAuthStore((state) => state.user);
+  const showBetNotification = useBetNotificationStore((state) => state.showNotification);
   const subscriptionRef = useRef<any>(null);
   const prevBalanceRef = useRef<number>(balance);
 
@@ -50,14 +52,21 @@ export default function BettingHistoryScreen() {
       
       // Check and resolve pending bets
       const pendingBets = allBets.filter(b => b.status === 'pending');
+      let firstResolution: { matchNumber: number; won: boolean; payout: number } | null = null;
       for (const bet of pendingBets) {
         try {
-          await bettingService.checkAndResolveBets(bet.matchKey);
+          const resolutions = await bettingService.checkAndResolveBets(bet.matchKey);
+          if (!firstResolution && resolutions?.[0]) {
+            firstResolution = resolutions[0];
+          }
         } catch (error) {
           console.error(`Error resolving bet ${bet.id}:`, error);
         }
       }
-      
+      if (firstResolution) {
+        showBetNotification(firstResolution);
+      }
+
       // Reload bets after resolution
       const updatedBets = await bettingService.getUserBets();
       setBets(updatedBets);
@@ -70,7 +79,7 @@ export default function BettingHistoryScreen() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [refreshBalance]);
+  }, [refreshBalance, showBetNotification]);
 
   const loadLeaderboard = useCallback(async () => {
     try {

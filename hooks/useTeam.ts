@@ -18,7 +18,7 @@ export function useTeam(teamKey: string | null) {
       return getTeam(teamKey);
     },
     enabled: !!teamKey,
-    staleTime: 60 * 60 * 1000, // 1 hour
+    staleTime: 10 * 60 * 1000, // 10 minutes max
   });
 }
 
