@@ -22,6 +22,22 @@ async function callEdgeFunction(functionName: string, body: any) {
 }
 
 export const edgeFunctions = {
+  // Auth operations (custom JWT)
+  async signInWithTeamCode(teamCode: string, scoutName: string) {
+    return callEdgeFunction('auth-operations', {
+      operation: 'signInWithTeamCode',
+      teamCode: teamCode.toUpperCase().trim(),
+      scoutName: scoutName.trim(),
+    });
+  },
+
+  async refreshToken(refreshToken: string) {
+    return callEdgeFunction('auth-operations', {
+      operation: 'refreshToken',
+      refresh_token: refreshToken,
+    });
+  },
+
   // Team operations
   async searchTeamByNumber(teamNumber: number) {
     return callEdgeFunction('team-operations', {
@@ -129,7 +145,7 @@ export const edgeFunctions = {
       operation: 'checkMatchExists',
       teamNumber,
       matchNumber,
-      teamNumber: teamNumberScouted,
+      teamNumberScouted,
     });
   },
 

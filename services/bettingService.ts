@@ -1,5 +1,6 @@
 // services/bettingService.ts
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
@@ -97,6 +98,7 @@ const ODDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes max
 
 class BettingService {
   private oddsCache = new Map<string, { odds: MatchOdds; fetchedAt: number }>();
+  private eligibilityCache = new Map<string, { canBet: boolean; reason?: string; fetchedAt: number }>();
   private oddsInFlight = new Map<string, Promise<MatchOdds>>();
 
   private getOddsCacheKey(redTeams: number[], blueTeams: number[], eventKey: string, matchKey?: string): string {
@@ -104,8 +106,25 @@ class BettingService {
   }
 
   /**
+   * Get cached eligibility (sync). Same TTL as odds cache.
+   */
+  getCachedEligibility(
+    redTeams: number[],
+    blueTeams: number[],
+    eventKey: string,
+    matchKey?: string
+  ): { canBet: boolean; reason?: string } | null {
+    const cacheKey = this.getOddsCacheKey(redTeams, blueTeams, eventKey, matchKey);
+    const cached = this.eligibilityCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < ODDS_CACHE_TTL_MS) {
+      return { canBet: cached.canBet, reason: cached.reason };
+    }
+    return null;
+  }
+
+  /**
    * Check if betting is allowed for a match. Requires at least 2 teams with valid data
-   * (manually scouted or Statbotics) per alliance. No default stdev/means - blocks when insufficient.
+   * (manually scouted or Statbotics) per alliance. Uses cache when valid (same TTL as odds).
    */
   async checkBettingEligibility(
     redTeams: number[],
@@ -113,6 +132,12 @@ class BettingService {
     eventKey: string,
     matchKey?: string
   ): Promise<{ canBet: boolean; reason?: string }> {
+    const cacheKey = this.getOddsCacheKey(redTeams, blueTeams, eventKey, matchKey);
+    const cached = this.eligibilityCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < ODDS_CACHE_TTL_MS) {
+      return { canBet: cached.canBet, reason: cached.reason };
+    }
+
     try {
       await teamStatisticsService.refreshTeamStatistics();
       const allTeams = [...redTeams, ...blueTeams];
@@ -122,19 +147,22 @@ class BettingService {
 
       const redOk = redAlliance.teamsWithValidData >= 2;
       const blueOk = blueAlliance.teamsWithValidData >= 2;
+      let result: { canBet: boolean; reason?: string };
       if (!redOk || !blueOk) {
-        return {
+        result = {
           canBet: false,
           reason: 'Insufficient data for accurate odds. Need at least 2 teams with data per alliance (manually scouted or Statbotics).',
         };
+      } else {
+        const redVar = (redAlliance.stdDev ?? 0) ** 2;
+        const blueVar = (blueAlliance.stdDev ?? 0) ** 2;
+        const marginStd = Math.sqrt(redVar + blueVar);
+        result = marginStd <= 0
+          ? { canBet: false, reason: 'Insufficient data for accurate odds.' }
+          : { canBet: true };
       }
-      const redVar = (redAlliance.stdDev ?? 0) ** 2;
-      const blueVar = (blueAlliance.stdDev ?? 0) ** 2;
-      const marginStd = Math.sqrt(redVar + blueVar);
-      if (marginStd <= 0) {
-        return { canBet: false, reason: 'Insufficient data for accurate odds.' };
-      }
-      return { canBet: true };
+      this.eligibilityCache.set(cacheKey, { ...result, fetchedAt: Date.now() });
+      return result;
     } catch (error) {
       console.error('Error checking betting eligibility:', error);
       return { canBet: false, reason: 'Insufficient data for accurate odds.' };
@@ -684,15 +712,18 @@ class BettingService {
    */
   async placeBet(betData: BetData): Promise<string | null> {
     try {
-      const userIdentifier = await this.getUserIdentifier();
-      if (!userIdentifier) {
-        throw new Error('No user identifier');
+      const [userIdentifier, teamId] = await Promise.all([
+        this.getUserIdentifier(),
+        useAuthStore.getState().getTeamId(),
+      ]);
+      if (!userIdentifier || !teamId) {
+        throw new Error('No user identifier or team');
       }
 
-      // Insert bet
       const { data, error } = await supabase
         .from('bets')
         .insert({
+          team_id: teamId,
           user_identifier: userIdentifier,
           match_key: betData.matchKey,
           match_number: betData.matchNumber,

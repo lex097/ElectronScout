@@ -149,13 +149,14 @@ Deno.serve(async (req) => {
         }
 
         const { data: existing, error: selectError } = await existingQuery.maybeSingle();
+        const selectErr = selectError as { code?: string } | null;
 
         const updateData: any = {
           team_rankings: teamRankingsJson,
           updated_at: new Date().toISOString(),
         };
 
-        if (existing && selectError?.code !== 'PGRST116') {
+        if (existing && selectErr?.code !== 'PGRST116') {
           // Update existing
           let updateQuery = supabase
             .from('picklists')

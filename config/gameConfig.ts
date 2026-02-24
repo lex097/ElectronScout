@@ -147,7 +147,7 @@ export interface GameConfig {
 
 // 2026 GAME CONFIG - Change this each year!
 export const GAME_2026: GameConfig = {
-  year: 2026,
+  year: 2025,
   gameName: "Rebuilt",
   phases: [
     {

@@ -16,8 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function EnterNameScreen() {
-  const params = useLocalSearchParams<{ teamId: string; teamNumber: string }>();
-  const { teamId, teamNumber } = params;
+  const params = useLocalSearchParams<{ teamId: string; teamNumber: string; teamCode: string }>();
+  const { teamId, teamNumber, teamCode } = params;
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const login = useAuthStore((state) => state.login);
@@ -28,16 +28,15 @@ export default function EnterNameScreen() {
       return;
     }
 
-    if (!teamNumber) {
-      Alert.alert('Error', 'Team number is missing');
+    if (!teamCode || teamCode.length !== 6) {
+      Alert.alert('Error', 'Team code is missing or invalid. Please go back and try again.');
       router.replace('/login');
       return;
     }
 
     setIsLoading(true);
     try {
-      // Store name and complete authentication
-      await login(name.trim(), teamNumber);
+      await login(teamCode, name.trim());
 
       // Navigate to main app
       router.replace('/(tabs)');

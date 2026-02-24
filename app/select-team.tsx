@@ -64,6 +64,12 @@ export default function SelectTeamScreen() {
       setBettingAllowed(false);
       return;
     }
+    // Use cached eligibility if available (same match, within TTL) - avoids loading spinner on return
+    const cached = bettingService.getCachedEligibility(redTeams, blueTeams, eventKey, match?.key);
+    if (cached) {
+      setBettingAllowed(cached.canBet);
+      return; // Cache hit, no need to re-fetch
+    }
     let cancelled = false;
     setBettingAllowed(null);
     bettingService

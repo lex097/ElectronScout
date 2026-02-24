@@ -83,13 +83,9 @@ class TeamStatisticsService {
     excludeEventKey: string
   ): Promise<number | null> {
     try {
-      const teamId = await supabaseSyncService.getTeamId();
-      if (!teamId) return null;
-
       const { data, error } = await supabase
-        .from('team_statistics')
+        .from('team_statistics_secure')
         .select('std_dev_score, match_count')
-        .eq('team_id', teamId)
         .eq('team_number', teamNumber)
         .neq('event_key', excludeEventKey)
         .not('event_key', 'is', null);
@@ -121,13 +117,9 @@ class TeamStatisticsService {
     if (teamNumbers.length === 0) return result;
 
     try {
-      const teamId = await supabaseSyncService.getTeamId();
-      if (!teamId) return result;
-
       const { data, error } = await supabase
-        .from('team_statistics')
+        .from('team_statistics_secure')
         .select('team_number, std_dev_score, match_count')
-        .eq('team_id', teamId)
         .in('team_number', teamNumbers)
         .neq('event_key', excludeEventKey)
         .not('event_key', 'is', null);
@@ -166,16 +158,9 @@ class TeamStatisticsService {
     eventKey?: string
   ): Promise<TeamStatistics | null> {
     try {
-      const teamId = await supabaseSyncService.getTeamId();
-      if (!teamId) {
-        console.warn('No team context for team statistics');
-        return null;
-      }
-
       let query = supabase
-        .from('team_statistics')
+        .from('team_statistics_secure')
         .select('*')
-        .eq('team_id', teamId)
         .eq('team_number', teamNumber);
 
       if (eventKey) {
@@ -228,9 +213,8 @@ class TeamStatisticsService {
       }
       
       let query = supabase
-        .from('team_statistics')
+        .from('team_statistics_secure')
         .select('*')
-        .eq('team_id', teamId)
         .in('team_number', teamNumbers);
 
       if (eventKey) {
@@ -640,15 +624,9 @@ class TeamStatisticsService {
     eventKey: string
   ): Promise<Map<number, TeamStatistics>> {
     try {
-      const teamId = await supabaseSyncService.getTeamId();
-      if (!teamId) {
-        return new Map();
-      }
-
       const { data, error } = await supabase
-        .from('team_statistics')
+        .from('team_statistics_secure')
         .select('*')
-        .eq('team_id', teamId)
         .eq('event_key', eventKey);
 
       if (error || !data) {

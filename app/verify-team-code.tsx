@@ -49,7 +49,6 @@ export default function VerifyTeamCodeScreen() {
         return;
       }
 
-      // Get scout name from AsyncStorage (should be set in login screen)
       const scoutName = await getScoutName();
       if (!scoutName) {
         Alert.alert('Error', 'Scout name not found. Please log in again.');
@@ -57,8 +56,7 @@ export default function VerifyTeamCodeScreen() {
         return;
       }
 
-      // Complete authentication
-      await login(scoutName, teamNumber);
+      await login(teamCode.toUpperCase().trim(), scoutName);
 
       // Navigate to main app
       router.replace('/(tabs)');

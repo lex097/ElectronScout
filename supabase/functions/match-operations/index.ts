@@ -156,13 +156,26 @@ Deno.serve(async (req) => {
         const failedIds: string[] = [];
         const skippedDeletedIds: string[] = [];
 
-        for (let i = 0; i < matches.length; i += batchSize) {
-          const batch = matches.slice(i, i + batchSize);
-          const deletedSet = await getDeletedMatchIds(supabase, teamId, batch.map(b => b.id));
-          const filteredBatch = batch.filter(b => !deletedSet.has(b.id));
-          skippedDeletedIds.push(...batch.filter(b => deletedSet.has(b.id)).map(b => b.id));
+        interface MatchInput {
+          id: string;
+          event_key?: string;
+          match_number: number;
+          team_number: number;
+          scout_name?: string;
+          game_year?: number;
+          metrics?: Record<string, unknown>;
+          calculated_points?: number;
+          notes?: string;
+          timestamp?: string;
+        }
 
-          const insertData = filteredBatch.map(m => ({
+        for (let i = 0; i < matches.length; i += batchSize) {
+          const batch = matches.slice(i, i + batchSize) as MatchInput[];
+          const deletedSet = await getDeletedMatchIds(supabase, teamId, batch.map((b: MatchInput) => b.id));
+          const filteredBatch = batch.filter((b: MatchInput) => !deletedSet.has(b.id));
+          skippedDeletedIds.push(...batch.filter((b: MatchInput) => deletedSet.has(b.id)).map((b: MatchInput) => b.id));
+
+          const insertData = filteredBatch.map((m: MatchInput) => ({
             id: m.id,
             team_id: teamId,
             event_key: m.event_key || null,
@@ -184,9 +197,9 @@ Deno.serve(async (req) => {
             .select('id');
 
           if (error) {
-            failedIds.push(...insertData.map(d => d.id));
+            failedIds.push(...insertData.map((d: { id: string }) => d.id));
           } else {
-            insertedIds.push(...(data || []).map(d => String(d.id)));
+            insertedIds.push(...(data || []).map((d: { id?: string }) => String(d.id)));
           }
         }
 
@@ -254,8 +267,8 @@ Deno.serve(async (req) => {
           break;
         }
 
-        const deletedMatchIds = new Set((deletionsData || []).map(d => String(d.match_id)));
-        const filteredMatches = (data || []).filter(m => !deletedMatchIds.has(String(m.id)));
+        const deletedMatchIds = new Set((deletionsData || []).map((d: { match_id?: string }) => String(d.match_id)));
+        const filteredMatches = (data || []).filter((m: { id?: string }) => !deletedMatchIds.has(String(m.id)));
 
         result = { matches: filteredMatches };
         break;
@@ -267,7 +280,7 @@ Deno.serve(async (req) => {
           break;
         }
 
-        const { matchNumber, teamNumber: teamNumberScouted } = params;
+        const { matchNumber, teamNumberScouted } = params;
         const [{ data: matchesData, error }, { data: deletionsData }] = await Promise.all([
           supabase
             .from('matches')
@@ -279,9 +292,9 @@ Deno.serve(async (req) => {
           supabase.from('match_deletions').select('match_id').eq('team_id', teamId),
         ]);
 
-        const deletedIds = new Set((deletionsData || []).map((d) => String(d.match_id)));
+        const deletedIds = new Set((deletionsData || []).map((d: { match_id?: string }) => String(d.match_id)));
         const exists = !error && (matchesData?.length || 0) > 0;
-        const notDeleted = exists && !matchesData?.some((m) => deletedIds.has(String(m.id)));
+        const notDeleted = exists && !matchesData?.some((m: { id?: string }) => deletedIds.has(String(m.id)));
 
         result = { exists: notDeleted };
         break;
@@ -317,11 +330,11 @@ Deno.serve(async (req) => {
           break;
         }
 
-        const deletedMatchIds = new Set((deletionsData || []).map(d => String(d.match_id)));
-        const filteredMatches = (matchesData || []).filter(m => !deletedMatchIds.has(String(m.id)));
+        const deletedMatchIds = new Set((deletionsData || []).map((d: { match_id?: string }) => String(d.match_id)));
+        const filteredMatches = (matchesData || []).filter((m: { id?: string }) => !deletedMatchIds.has(String(m.id)));
 
         result = {
-          matches: filteredMatches.map(m => ({
+          matches: filteredMatches.map((m: Record<string, unknown>) => ({
             id: m.id,
             matchNumber: m.match_number,
             teamNumber: m.team_number,

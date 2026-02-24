@@ -47,12 +47,13 @@ export default function LoginScreen() {
         return;
       }
 
-      // Navigate to name entry screen
+      // Navigate to name entry screen (pass teamCode for auth)
       router.push({
         pathname: '/enter-name' as any,
         params: {
           teamId: teamId,
           teamNumber: teamNumber.toString(),
+          teamCode: teamCode.toUpperCase().trim(),
         },
       });
     } catch (error) {

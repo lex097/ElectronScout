@@ -1,5 +1,6 @@
 // stores/ebucksStore.ts
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
@@ -62,11 +63,16 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
       if (data) {
         balance = data.balance || 0;
       } else {
-        // Create initial balance record (use upsert to handle race conditions)
+        const teamId = await useAuthStore.getState().getTeamId();
+        if (!teamId) {
+          set({ balance: 0, isLoading: false });
+          return;
+        }
         const [scoutName, teamNumber] = userIdentifier.split(':');
         const { data: upsertData, error: upsertError } = await supabase
           .from('user_ebucks_balance')
           .upsert({
+            team_id: teamId,
             user_identifier: userIdentifier,
             scout_name: scoutName,
             team_number: teamNumber,
@@ -74,7 +80,7 @@ export const useEbucksStore = create<EbucksState>((set, get) => ({
             total_earned: 0,
             total_spent: 0,
           }, {
-            onConflict: 'user_identifier',
+            onConflict: 'team_id,user_identifier',
             ignoreDuplicates: false,
           })
           .select('balance')

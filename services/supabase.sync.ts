@@ -76,24 +76,18 @@ export class SupabaseSyncService {
   }
 
   /**
-   * Get current team's ID from team_number stored in AsyncStorage
+   * Get current team's ID from auth store (set during login with team code)
    */
   async getTeamId(): Promise<string | null> {
     if (this.MOCK_MODE) {
-      // In mock mode, lookup team_id from mock team_number
       return await this.getTeamIdByNumber(this.MOCK_TEAM_NUMBER);
     }
 
     try {
-      const teamNumber = await this.getTeamNumber();
-      if (!teamNumber) {
-        console.error('No team number found');
-        return null;
-      }
-
-      return await this.getTeamIdByNumber(teamNumber);
+      const teamId = await AsyncStorage.getItem('team_id');
+      return teamId;
     } catch (error) {
-      console.error('Error getting team context:', error);
+      console.error('Error getting team_id:', error);
       return null;
     }
   }
