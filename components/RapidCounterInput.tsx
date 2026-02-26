@@ -2,7 +2,7 @@
 import { Metric } from '@/config/gameConfig';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
 
 interface RapidCounterInputProps {
   metric: Metric;
@@ -332,16 +332,14 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           indicatorPositionAnim.setValue(0.5);
           
           // Measure IMMEDIATELY before animation starts to get current position
-          // The panel expands from its top, so pageY stays the same
-          containerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
-            // Only use measurements if they're valid (pageY can be 0 if at top of screen, that's ok)
-            if (typeof pageY === 'number' && typeof pageX === 'number' && !isNaN(pageY) && !isNaN(pageX)) {
-              containerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          // Use measureInWindow for accurate screen coordinates (works in all phases)
+          containerRef.current?.measureInWindow((x: number, y: number, width: number, height: number) => {
+            if (typeof y === 'number' && !isNaN(y)) {
+              containerLayout.current = { x: x, y: y, width, height: EXPANDED_HEIGHT };
               
               // Calculate initial indicator position based on where finger currently is
-              // startYRef.current has the finger's screen position from onPanResponderGrant
               const fingerY = startYRef.current;
-              const relativeY = fingerY - pageY;
+              const relativeY = fingerY - y;
               const normalizedPosition = relativeY / EXPANDED_HEIGHT;
               const clampedPosition = Math.max(0, Math.min(1, 1 - normalizedPosition));
               
@@ -351,18 +349,17 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
               setDisplayRate(initialRate);
               indicatorPositionAnim.setValue(clampedPosition);
               
-              // Notify parent to scroll IMMEDIATELY - don't wait for animation
-              // The panel will expand to EXPANDED_HEIGHT from the current pageY
+              // Expand first so parent adds padding (creates scroll room), then scroll on next frame
+              setIsExpanded(true);
+              isExpandedRef.current = true;
+              onExpandedChange?.(true);
               if (onExpand) {
-                onExpand(pageY, EXPANDED_HEIGHT);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => onExpand(y, EXPANDED_HEIGHT));
+                });
               }
             }
           });
-          
-          // Expand
-          setIsExpanded(true);
-          isExpandedRef.current = true;
-          onExpandedChange?.(true);
           Animated.parallel([
             Animated.spring(expandAnim, {
               toValue: EXPANDED_HEIGHT,
@@ -681,14 +678,14 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
           setDisplayDecrementRate(defaultRate);
           decrementIndicatorPositionAnim.setValue(0.5);
           
-          // Measure container position
-          decrementContainerRef.current?.measure((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
-            if (typeof pageY === 'number' && typeof pageX === 'number' && !isNaN(pageY) && !isNaN(pageX)) {
-              decrementContainerLayout.current = { x: pageX, y: pageY, width, height: EXPANDED_HEIGHT };
+          // Measure container position - use measureInWindow for accurate screen coordinates
+          decrementContainerRef.current?.measureInWindow((x: number, y: number, width: number, height: number) => {
+            if (typeof y === 'number' && !isNaN(y)) {
+              decrementContainerLayout.current = { x: x, y: y, width, height: EXPANDED_HEIGHT };
               
               // Calculate initial indicator position
               const fingerY = decrementStartYRef.current;
-              const relativeY = fingerY - pageY;
+              const relativeY = fingerY - y;
               const normalizedPosition = relativeY / EXPANDED_HEIGHT;
               const clampedPosition = Math.max(0, Math.min(1, 1 - normalizedPosition));
               
@@ -698,17 +695,17 @@ export const RapidCounterInput: React.FC<RapidCounterInputProps> = ({
               setDisplayDecrementRate(initialRate);
               decrementIndicatorPositionAnim.setValue(clampedPosition);
               
-              // Notify parent to scroll
+              // Expand first so parent adds padding, then scroll on next frame
+              setIsDecrementExpanded(true);
+              decrementIsExpandedRef.current = true;
+              onExpandedChange?.(true);
               if (onExpand) {
-                onExpand(pageY, EXPANDED_HEIGHT);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => onExpand(y, EXPANDED_HEIGHT));
+                });
               }
             }
           });
-          
-          // Expand
-          setIsDecrementExpanded(true);
-          decrementIsExpandedRef.current = true;
-          onExpandedChange?.(true);
           Animated.parallel([
             Animated.spring(decrementExpandAnim, {
               toValue: EXPANDED_HEIGHT,

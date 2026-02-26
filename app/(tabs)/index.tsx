@@ -29,7 +29,7 @@ export default function MatchScoutScreen() {
   }>();
 
   const [isTBAMode, setIsTBAMode] = useState(true);
-  const [matchNumber, setMatchNumber] = useState('1');
+  const [matchNumber, setMatchNumber] = useState('');
   const [teamNumber, setTeamNumber] = useState('');
   const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
   const [selectedMatchNumber, setSelectedMatchNumber] = useState<string | null>(null);
@@ -46,6 +46,8 @@ export default function MatchScoutScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const prevMatchNumberRef = useRef<string>('');
   const prevTeamNumberRef = useRef<string>('');
+  const matchNumberRef = useRef<string>('');
+  const teamNumberRef = useRef<string>('');
   const loadedSelectionRef = useRef<{ matchNumber: string; teamNumber: string } | null>(null);
   const matchStartedRef = useRef<boolean>(false);
   const autonomousTimeRemainingRef = useRef<number | null>(null);
@@ -101,12 +103,23 @@ export default function MatchScoutScreen() {
         if (matchNum) {
           setSelectedMatchNumber(matchNum);
           setMatchNumber(matchNum);
+          matchNumberRef.current = matchNum;
+        } else {
+          setSelectedMatchNumber(null);
+          setMatchNumber('');
+          matchNumberRef.current = '';
         }
         if (teamNum) {
           setTeamNumber(teamNum);
+          teamNumberRef.current = teamNum;
+        } else {
+          setTeamNumber('');
+          teamNumberRef.current = '';
         }
         if (matchNum && teamNum) {
           loadedSelectionRef.current = { matchNumber: matchNum, teamNumber: teamNum };
+        } else {
+          loadedSelectionRef.current = null;
         }
       } catch (error) {
         console.error('Error loading preferences:', error);
@@ -129,12 +142,23 @@ export default function MatchScoutScreen() {
           if (matchNum) {
             setSelectedMatchNumber(matchNum);
             setMatchNumber(matchNum);
+            matchNumberRef.current = matchNum;
+          } else {
+            setSelectedMatchNumber(null);
+            setMatchNumber('');
+            matchNumberRef.current = '';
           }
           if (teamNum) {
             setTeamNumber(teamNum);
+            teamNumberRef.current = teamNum;
+          } else {
+            setTeamNumber('');
+            teamNumberRef.current = '';
           }
           if (matchNum && teamNum) {
             loadedSelectionRef.current = { matchNumber: matchNum, teamNumber: teamNum };
+          } else {
+            loadedSelectionRef.current = null;
           }
         } catch (error) {
           console.error('Error reloading preferences:', error);
@@ -151,6 +175,8 @@ export default function MatchScoutScreen() {
       const newMatchNumber = params.matchNumber;
       const newTeamNumber = params.teamNumber;
       loadedSelectionRef.current = { matchNumber: newMatchNumber, teamNumber: newTeamNumber };
+      matchNumberRef.current = newMatchNumber;
+      teamNumberRef.current = newTeamNumber;
       
       // Only update if values actually changed
       if (newMatchNumber !== matchNumber) {
@@ -198,6 +224,8 @@ export default function MatchScoutScreen() {
     // Update refs
     prevMatchNumberRef.current = matchNumber;
     prevTeamNumberRef.current = teamNumber;
+    matchNumberRef.current = matchNumber;
+    teamNumberRef.current = teamNumber;
   }, [matchNumber, teamNumber]);
 
   // Timer countdown effect - use refs to avoid re-render issues
@@ -298,6 +326,16 @@ export default function MatchScoutScreen() {
     await AsyncStorage.setItem(TBA_MODE_KEY, value.toString());
   };
 
+  // Update refs synchronously when user types so startMatch always sees latest values
+  const handleMatchNumberChange = useCallback((value: string) => {
+    matchNumberRef.current = value;
+    setMatchNumber(value);
+  }, []);
+  const handleTeamNumberChange = useCallback((value: string) => {
+    teamNumberRef.current = value;
+    setTeamNumber(value);
+  }, []);
+
   const handleSelectEvent = () => {
     router.push('/select-event' as any);
   };
@@ -318,8 +356,8 @@ export default function MatchScoutScreen() {
   }, []);
 
   const startMatch = useCallback(() => {
-    const match = matchNumber?.trim() || loadedSelectionRef.current?.matchNumber || '';
-    const team = teamNumber?.trim() || loadedSelectionRef.current?.teamNumber || '';
+    const match = matchNumberRef.current?.trim() || '';
+    const team = teamNumberRef.current?.trim() || '';
     if (!match || !team) {
       Alert.alert('Select a match', 'Please select a match and team before starting.');
       return;
@@ -340,7 +378,7 @@ export default function MatchScoutScreen() {
         timerIntervalRef.current = null;
       }
     }
-  }, [isAutonomousPhase, autonomousDuration, matchNumber, teamNumber]);
+  }, [isAutonomousPhase, autonomousDuration]);
 
   const updateMetric = (metricId: string, value: any) => {
     // Start match if user starts scoring in autonomous phase (only if timer hasn't completed)
@@ -464,39 +502,35 @@ export default function MatchScoutScreen() {
   };
 
   const handleRapidCounterExpand = useCallback((pageY: number, containerHeight: number) => {
-    // pageY is the absolute screen position of the panel after expansion
-    // containerHeight is the expanded panel height (300)
-    
-    if (scrollViewRef.current) {
-      const threshold = 50; // Distance from bottom of visible area to keep panel bottom visible
-      
-      // Calculate the visible area on screen
-      const screenHeight = Dimensions.get('window').height;
-      const tabBarHeight = 49 + insets.bottom; // Tab bar is typically 49px + safe area bottom
-      const headerHeight = 44 + insets.top; // Header is typically 44px + safe area top (but we use edges={[]} so might be 0)
-      
-      // The visible bottom of the ScrollView on screen (above the tab bar)
-      const visibleBottom = screenHeight - tabBarHeight;
-      
-      // The panel's bottom position on screen
-      const panelBottomScreen = pageY + containerHeight;
-      
-      // Check if panel bottom is below the visible area
-      if (panelBottomScreen > visibleBottom - threshold) {
-        // Calculate how much we need to scroll down
-        const scrollNeeded = panelBottomScreen - (visibleBottom - threshold);
-        
-        // Get current scroll position and add the delta
-        const currentScrollY = scrollYRef.current;
-        const newScrollY = currentScrollY + scrollNeeded;
-        
-        scrollViewRef.current?.scrollTo({
-          y: newScrollY,
-          animated: true,
-        });
-      }
-    }
-  }, [insets.bottom, insets.top]);
+    // pageY = panel top in window coords (from measureInWindow)
+    // containerHeight = expanded panel height
+    // Measure ScrollView's visible bounds for accurate calculation on any device
+    const scrollView = scrollViewRef.current;
+    if (!scrollView) return;
+
+    const doScroll = () => {
+      (scrollView as any).measureInWindow((_x: number, scrollViewY: number, _w: number, scrollViewHeight: number) => {
+        // Bottom of visible area = ScrollView bottom minus tab bar + safe area
+        const tabBarAndSafeArea = 56 + insets.bottom;
+        const visibleBottom = scrollViewY + scrollViewHeight - tabBarAndSafeArea;
+        const panelBottomScreen = pageY + containerHeight;
+        const paddingAboveNav = 16;
+
+        if (panelBottomScreen > visibleBottom - paddingAboveNav) {
+          const scrollNeeded = panelBottomScreen - (visibleBottom - paddingAboveNav);
+          const newScrollY = scrollYRef.current + scrollNeeded;
+
+          scrollView.scrollTo({
+            y: newScrollY,
+            animated: true,
+          });
+        }
+      });
+    };
+
+    // Run after layout has updated with padding (called from RAF in RapidCounter)
+    doScroll();
+  }, [insets.bottom]);
 
   const handleNotesFocus = useCallback(() => {
     // Wait a bit for the keyboard to start appearing, then scroll so save button is right above keyboard
@@ -578,7 +612,7 @@ export default function MatchScoutScreen() {
     // Dismiss keyboard when saving
     Keyboard.dismiss();
     
-    if (!teamNumber || !matchNumber) {
+    if (!matchNumber?.trim() || !teamNumber?.trim()) {
       Alert.alert('Error', 'Please enter match and team number');
       return;
     }
@@ -633,7 +667,8 @@ export default function MatchScoutScreen() {
               // If timer was running (e.g. still in autonomous), reset match and timer state
               resetMatchAndTimerState();
               if (isTBAMode) {
-                // In TBA mode, go back to match selection
+                // Clear match/team selection so if user swipes back without selecting, fields stay clear
+                await AsyncStorage.multiRemove([SELECTED_MATCH_KEY, SELECTED_MATCH_NUMBER_KEY, SELECTED_TEAM_NUMBER_KEY]);
                 const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
                 if (eventKey) {
                   router.push({
@@ -646,7 +681,7 @@ export default function MatchScoutScreen() {
                 }
               } else {
                 // In manual mode, increment match number
-                setMatchNumber((parseInt(matchNumber) + 1).toString());
+                setMatchNumber(String((parseInt(matchNumber, 10) || 0) + 1));
                 setTeamNumber('');
               }
               setMetrics(getInitialMatchData());
@@ -674,7 +709,10 @@ export default function MatchScoutScreen() {
       <ScrollView 
         ref={scrollViewRef}
         style={styles.scrollView}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          isRapidCounterExpanded && { paddingBottom: 16 + 320 },
+        ]}
         scrollEnabled={!isRapidCounterExpanded}
         nestedScrollEnabled={!isRapidCounterExpanded}
         onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -726,7 +764,7 @@ export default function MatchScoutScreen() {
               </View>
             )}
 
-            {selectedMatchNumber && (
+            {selectedEventName && (
               <TouchableOpacity
                 style={styles.selectMatchButton}
                 onPress={async () => {
@@ -758,7 +796,7 @@ export default function MatchScoutScreen() {
                 <TextInput
                   style={styles.input}
                   value={matchNumber}
-                  onChangeText={setMatchNumber}
+                  onChangeText={handleMatchNumberChange}
                   keyboardType="number-pad"
                   placeholder="1"
                 />
@@ -769,7 +807,7 @@ export default function MatchScoutScreen() {
                 <TextInput
                   style={styles.input}
                   value={teamNumber}
-                  onChangeText={setTeamNumber}
+                  onChangeText={handleTeamNumberChange}
                   keyboardType="number-pad"
                   placeholder="1234"
                 />
@@ -783,7 +821,7 @@ export default function MatchScoutScreen() {
               <TextInput
                 style={styles.input}
                 value={matchNumber}
-                onChangeText={setMatchNumber}
+                onChangeText={handleMatchNumberChange}
                 keyboardType="number-pad"
               />
             </View>
@@ -793,7 +831,7 @@ export default function MatchScoutScreen() {
               <TextInput
                 style={styles.input}
                 value={teamNumber}
-                onChangeText={setTeamNumber}
+                onChangeText={handleTeamNumberChange}
                 keyboardType="number-pad"
                 placeholder="1234"
               />
