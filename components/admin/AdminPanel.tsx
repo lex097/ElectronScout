@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { adminService, MatchRow, TeamContext } from '@/services/adminService';
 import { useAdminStore } from '@/stores/adminStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -36,6 +37,8 @@ export function AdminPanel() {
 
   const [team, setTeam] = useState<TeamContext | null>(null);
   const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [eventKey, setEventKey] = useState<string | null>(null);
+  const [eventName, setEventName] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -63,9 +66,15 @@ export function AdminPanel() {
     }
 
     try {
-      const ctx = await adminService.getTeamContext(teamNumber);
+      const [ctx, storedEventKey, storedEventName] = await Promise.all([
+        adminService.getTeamContext(teamNumber),
+        AsyncStorage.getItem('selected_event_key'),
+        AsyncStorage.getItem('selected_event_name'),
+      ]);
       setTeam(ctx);
-      const rows = await adminService.listTeamMatches(ctx.teamId);
+      setEventKey(storedEventKey);
+      setEventName(storedEventName);
+      const rows = await adminService.listTeamMatches(ctx.teamId, storedEventKey);
       setMatches(rows);
     } catch (e) {
       setToast({ message: e instanceof Error ? e.message : 'Failed to load data.', kind: 'error' });
@@ -155,11 +164,15 @@ export function AdminPanel() {
     ]);
   };
 
-  const headerText = useMemo(() => {
-    if (!team) return 'Admin Panel';
+  const teamInfo = useMemo(() => {
+    if (!team) return null;
     const name = team.teamName ? `${team.teamName} ` : '';
     return `${name}(#${team.teamNumber})`;
   }, [team]);
+
+  const eventLabel = useMemo(() => {
+    return eventName?.trim() || eventKey || null;
+  }, [eventKey, eventName]);
 
   if (loading) {
     return (
@@ -175,9 +188,12 @@ export function AdminPanel() {
       {toast ? <Toast message={toast.message} kind={toast.kind} /> : null}
 
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
+        <View style={styles.headerTextContainer}>
           <Text style={styles.title}>Admin Panel</Text>
-          <Text style={styles.subtitle}>{headerText}</Text>
+          {teamInfo ? <Text style={styles.subtitle}>{teamInfo}</Text> : null}
+          {eventLabel ? (
+            <Text style={styles.eventName}>{eventLabel}</Text>
+          ) : null}
         </View>
         <TouchableOpacity
           style={styles.iconButton}
@@ -255,7 +271,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
     marginBottom: 12,
   },
@@ -264,9 +280,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#ff6600',
   },
+  headerTextContainer: {
+    flex: 1,
+  },
   subtitle: {
     marginTop: 2,
     color: '#b0b0b0',
+  },
+  eventName: {
+    marginTop: 4,
+    color: '#b0b0b0',
+    fontSize: 14,
   },
   lockButton: {
     flexDirection: 'row',

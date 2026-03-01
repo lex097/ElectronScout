@@ -80,16 +80,21 @@ export class AdminService {
     return String(data.admin_code || '') === code;
   }
 
-  async listTeamMatches(teamId: string): Promise<MatchRow[]> {
+  async listTeamMatches(teamId: string, eventKey?: string | null): Promise<MatchRow[]> {
+    let query = supabase
+      .from('matches')
+      .select(
+        'id, team_id, event_key, match_number, team_number, scout_name, game_year, metrics, calculated_points, notes, timestamp'
+      )
+      .eq('team_id', teamId);
+
+    if (eventKey?.trim()) {
+      query = query.eq('event_key', eventKey.trim());
+    }
+
     const [{ data: matchesData, error: matchesError }, { data: deletionsData, error: deletionsError }] =
       await Promise.all([
-        supabase
-          .from('matches')
-          .select(
-            'id, team_id, event_key, match_number, team_number, scout_name, game_year, metrics, calculated_points, notes, timestamp'
-          )
-          .eq('team_id', teamId)
-          .order('timestamp', { ascending: false }),
+        query.order('timestamp', { ascending: false }),
         supabase.from('match_deletions').select('match_id').eq('team_id', teamId),
       ]);
 
