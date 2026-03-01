@@ -1,5 +1,8 @@
 // app/select-event.tsx - Event Selection Screen
 import { useEvents } from '@/hooks/useEvents';
+import { queryClient } from '@/config/queryClient';
+import { queryKeys } from '@/config/queryKeys';
+import { matchesCacheService } from '@/services/matchesCacheService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -50,6 +53,13 @@ export default function SelectEventScreen() {
     // Save selected event info to AsyncStorage
     await AsyncStorage.setItem('selected_event_key', event.key);
     await AsyncStorage.setItem('selected_event_name', event.name);
+
+    // Prefetch matches in background so select-match/select-team load instantly
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.matches.byEvent(event.key),
+      queryFn: () => matchesCacheService.fetchAndCache(event.key),
+      staleTime: 1 * 60 * 1000,
+    });
 
     router.back();
   };

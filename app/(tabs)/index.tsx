@@ -1,5 +1,8 @@
 // app/(tabs)/index.tsx - Match Scouting Screen
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { queryClient } from '@/config/queryClient';
+import { queryKeys } from '@/config/queryKeys';
+import { matchesCacheService } from '@/services/matchesCacheService';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -134,8 +137,18 @@ export default function MatchScoutScreen() {
     useCallback(() => {
       const reloadPreferences = async () => {
         try {
+          const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
           const eventName = await AsyncStorage.getItem(SELECTED_EVENT_NAME_KEY);
           setSelectedEventName(eventName);
+
+          // Prefetch matches in background so select-match/select-team load instantly
+          if (eventKey) {
+            queryClient.prefetchQuery({
+              queryKey: queryKeys.matches.byEvent(eventKey),
+              queryFn: () => matchesCacheService.fetchAndCache(eventKey),
+              staleTime: 1 * 60 * 1000,
+            });
+          }
 
           const matchNum = await AsyncStorage.getItem(SELECTED_MATCH_NUMBER_KEY);
           const teamNum = await AsyncStorage.getItem(SELECTED_TEAM_NUMBER_KEY);

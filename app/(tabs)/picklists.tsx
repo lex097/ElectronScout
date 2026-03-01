@@ -1,6 +1,7 @@
 // app/(tabs)/picklists.tsx
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -15,153 +16,52 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getEventRankings } from '../../api/services/events';
 import { ACTIVE_GAME_CONFIG, GameConfig } from '../../config/gameConfig';
-import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
-import { db } from '../../services/database';
+import { TeamAnalytics } from '../../services/analyticsService';
 import { Picklists, picklistService } from '../../services/picklistService';
-import { supabaseSyncService } from '../../services/supabase.sync';
 import { useAdminStore } from '../../stores/adminStore';
 import { useAuthStore } from '../../stores/authStore';
-
-interface RankedTeam {
-  teamNumber: number;
-  rank: number;
-  analytics?: TeamAnalytics;
-}
+import { usePicklistData, RankedTeam } from '../../hooks/usePicklistData';
+import { queryKeys } from '../../config/queryKeys';
 
 export default function PicklistsScreen() {
+  const queryClient = useQueryClient();
   const [eventKey, setEventKey] = useState<string | null>(null);
-  const [allRankedTeams, setAllRankedTeams] = useState<RankedTeam[]>([]); // All teams with ranks
-  const [rankedTeams, setRankedTeams] = useState<RankedTeam[]>([]); // Only teams not in picklists
-  const [teamAnalytics, setTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
-  const [picklists, setPicklists] = useState<Picklists>({
-    firstPick: [],
-    secondPick: [],
-    doNotPick: [],
-  });
+  const [teamNumber, setTeamNumber] = useState<string | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
   const [longPressedTeam, setLongPressedTeam] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const getTeamNumber = useAuthStore((state) => state.getTeamNumber);
-  // Subscribe to admin store state to trigger re-renders when admin status changes
-  const unlockedAtMs = useAdminStore((state) => state.unlockedAtMs);
-  const sessionTtlMs = useAdminStore((state) => state.sessionTtlMs);
   const isUnlockedFn = useAdminStore((state) => state.isUnlocked);
   const isAdminUnlocked = isUnlockedFn();
 
-  // Load event key and picklists from storage
-  useEffect(() => {
-    const loadStorage = async () => {
-      try {
-        const storedEventKey = await AsyncStorage.getItem('selected_event_key');
-        setEventKey(storedEventKey);
-
-        // Load picklists using the service (team-scoped)
-        const teamNumber = await getTeamNumber();
-        if (teamNumber && storedEventKey) {
-          const loadedPicklists = await picklistService.loadPicklists(teamNumber, storedEventKey);
-          setPicklists(loadedPicklists);
-        }
-      } catch (error) {
-        console.error('Error loading storage:', error);
-      }
-    };
-    loadStorage();
-  }, [getTeamNumber]);
-
-  // Load rankings and analytics
-  const loadData = useCallback(async (showRefresh = false) => {
-    if (!eventKey) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      if (showRefresh) setIsRefreshing(true);
-      else setIsLoading(true);
-
-      // Fetch rankings from TBA
-      const rankings = await getEventRankings(eventKey);
-
-      // Handle case where rankings might be undefined or empty
-      if (!rankings || !Array.isArray(rankings)) {
-        console.warn('Rankings data is not an array:', rankings);
-        setRankedTeams([]);
-        setIsLoading(false);
-        setIsRefreshing(false);
-        return;
-      }
-
-      // Extract team numbers from rankings
-      const teamNumbers = rankings.map(r => {
-        // Extract team number from team_key (e.g., "frc254" -> 254)
-        const match = r.team_key.match(/frc(\d+)/);
-        return match ? parseInt(match[1], 10) : null;
-      }).filter((num): num is number => num !== null);
-
-      // Fetch analytics from both local and Supabase
-      const localMatches = await db.getAllMatches();
-      const teamMatches = await supabaseSyncService.getAllTeamMatches();
-      const allMatches = [...localMatches, ...teamMatches];
-      const analytics = analyticsService.calculateTeamAnalytics(allMatches);
-      setTeamAnalytics(analytics);
-
-      // Create ranked teams list
-      const ranked: RankedTeam[] = rankings
-        .map(r => {
-          const match = r.team_key.match(/frc(\d+)/);
-          if (!match) return null;
-          const teamNumber = parseInt(match[1], 10);
-          return {
-            teamNumber,
-            rank: r.rank,
-            analytics: analytics.get(teamNumber),
-          } as RankedTeam;
-        })
-        .filter((team): team is RankedTeam => team !== null);
-
-      // Get current picklists to filter (using service, team-scoped)
-      const teamNumber = await getTeamNumber();
-      const currentPicklists: Picklists = teamNumber && eventKey
-        ? await picklistService.loadPicklists(teamNumber, eventKey)
-        : { firstPick: [], secondPick: [], doNotPick: [] };
-
-      // Store all ranked teams
-      setAllRankedTeams(ranked);
-
-      // Store all ranked teams
-      setAllRankedTeams(ranked);
-
-      // Filter out teams that are already in picklists
-      const picklistTeamNumbers = new Set([
-        ...currentPicklists.firstPick,
-        ...currentPicklists.secondPick,
-        ...currentPicklists.doNotPick,
-      ]);
-
-      const availableTeams = ranked.filter(team => !picklistTeamNumbers.has(team.teamNumber));
-      setRankedTeams(availableTeams);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      Alert.alert('Error', 'Failed to load picklists data');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [eventKey, getTeamNumber]);
-
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      const loadStorage = async () => {
+        const storedEventKey = await AsyncStorage.getItem('selected_event_key');
+        const tn = await getTeamNumber();
+        setEventKey(storedEventKey);
+        setTeamNumber(tn);
+      };
+      loadStorage();
+    }, [getTeamNumber])
   );
 
+  const { data, isLoading, isFetching, refetch } = usePicklistData(
+    teamNumber,
+    eventKey
+  );
+
+  const allRankedTeams = data?.allRankedTeams ?? [];
+  const rankedTeams = data?.rankedTeams ?? [];
+  const teamAnalytics = data?.teamAnalytics ?? new Map<number, TeamAnalytics>();
+  const picklists = data?.picklists ?? {
+    firstPick: [],
+    secondPick: [],
+    doNotPick: [],
+  };
 
   // Move team from ranked list to picklist
-  const moveToPicklist = async (teamNumber: number, category: keyof Picklists) => {
-    // Check admin status
+  const moveToPicklist = async (teamNum: number, category: keyof Picklists) => {
     if (!isAdminUnlocked) {
       Alert.alert(
         'Admin Access Required',
@@ -170,37 +70,17 @@ export default function PicklistsScreen() {
       );
       return;
     }
-
+    if (!eventKey || !teamNumber) return;
     const newPicklists = { ...picklists };
-    newPicklists[category] = [...newPicklists[category], teamNumber];
-    
-    // Update picklists state first
-    setPicklists(newPicklists);
-    
-    // Save using service (team-scoped, saves to both Supabase and local storage)
-    if (eventKey) {
-      const teamNumberStr = await getTeamNumber();
-      if (teamNumberStr) {
-        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
-      }
-    }
-    
-    // Update ranked teams list immediately without reload
-    setAllRankedTeams(prevAll => {
-      const picklistTeamNumbers = new Set([
-        ...newPicklists.firstPick,
-        ...newPicklists.secondPick,
-        ...newPicklists.doNotPick,
-      ]);
-      const availableTeams = prevAll.filter((team: RankedTeam) => !picklistTeamNumbers.has(team.teamNumber));
-      setRankedTeams(availableTeams);
-      return prevAll;
+    newPicklists[category] = [...newPicklists[category], teamNum];
+    await picklistService.savePicklists(teamNumber, eventKey, newPicklists);
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.picklists.byTeamAndEvent(teamNumber, eventKey),
     });
   };
 
   // Remove team from picklist and return to ranked list
-  const removeFromPicklist = async (teamNumber: number, category: keyof Picklists) => {
-    // Check admin status
+  const removeFromPicklist = async (teamNum: number, category: keyof Picklists) => {
     if (!isAdminUnlocked) {
       Alert.alert(
         'Admin Access Required',
@@ -209,37 +89,17 @@ export default function PicklistsScreen() {
       );
       return;
     }
-
+    if (!eventKey || !teamNumber) return;
     const newPicklists = { ...picklists };
-    newPicklists[category] = newPicklists[category].filter(num => num !== teamNumber);
-    
-    // Update picklists state first
-    setPicklists(newPicklists);
-    
-    // Save using service (team-scoped, saves to both Supabase and local storage)
-    if (eventKey) {
-      const teamNumberStr = await getTeamNumber();
-      if (teamNumberStr) {
-        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
-      }
-    }
-    
-    // Update ranked teams list immediately without reload
-    setAllRankedTeams(prevAll => {
-      const picklistTeamNumbers = new Set([
-        ...newPicklists.firstPick,
-        ...newPicklists.secondPick,
-        ...newPicklists.doNotPick,
-      ]);
-      const availableTeams = prevAll.filter((team: RankedTeam) => !picklistTeamNumbers.has(team.teamNumber));
-      setRankedTeams(availableTeams);
-      return prevAll;
+    newPicklists[category] = newPicklists[category].filter(num => num !== teamNum);
+    await picklistService.savePicklists(teamNumber, eventKey, newPicklists);
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.picklists.byTeamAndEvent(teamNumber, eventKey),
     });
   };
 
   // Reorder teams in a picklist
   const reorderPicklist = async (category: keyof Picklists, fromIndex: number, toIndex: number) => {
-    // Check admin status
     if (!isAdminUnlocked) {
       Alert.alert(
         'Admin Access Required',
@@ -248,19 +108,14 @@ export default function PicklistsScreen() {
       );
       return;
     }
-
+    if (!eventKey || !teamNumber) return;
     const newPicklists = { ...picklists };
     const [removed] = newPicklists[category].splice(fromIndex, 1);
     newPicklists[category].splice(toIndex, 0, removed);
-    
-    // Update state and save using service (team-scoped)
-    setPicklists(newPicklists);
-    if (eventKey) {
-      const teamNumberStr = await getTeamNumber();
-      if (teamNumberStr) {
-        await picklistService.savePicklists(teamNumberStr, eventKey, newPicklists);
-      }
-    }
+    await picklistService.savePicklists(teamNumber, eventKey, newPicklists);
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.picklists.byTeamAndEvent(teamNumber, eventKey),
+    });
   };
 
   const calculatePhasePoints = (metrics: Record<string, any>, phaseId: string, config: GameConfig = ACTIVE_GAME_CONFIG): number => {
@@ -682,14 +537,14 @@ export default function PicklistsScreen() {
               <Text style={styles.sectionTitle}>Ranked Teams</Text>
               <Text style={styles.hintText}>Hold down on a team to add to picklist</Text>
             </View>
-            <TouchableOpacity onPress={() => loadData(true)}>
+            <TouchableOpacity onPress={() => refetch()}>
               <Ionicons name="refresh" size={24} color="#ff6600" />
             </TouchableOpacity>
           </View>
           <ScrollView
             style={styles.rankedTeamsList}
             refreshControl={
-              <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />
+              <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} />
             }
           >
             {rankedTeams.map((team) => (

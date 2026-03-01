@@ -1,6 +1,7 @@
 // app/(tabs)/analytics.tsx
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -20,20 +21,19 @@ import { ACTIVE_GAME_CONFIG, calculateMatchPoints, GameConfig } from '../../conf
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
 import { exportService } from '../../services/exportService';
-import { supabaseSyncService } from '../../services/supabase.sync';
 import { syncManager } from '../../services/syncTransformer';
 import { MatchData } from '../../types/match';
+import { useAnalyticsTeam } from '../../hooks/useAnalytics';
+import { queryKeys } from '../../config/queryKeys';
+import { supabaseSyncService } from '../../services/supabase.sync';
 
 type SortField = 'avgScore' | 'avgAuto' | 'avgTeleop' | 'avgEndgame';
 type SortDirection = 'asc' | 'desc';
 type DataSource = 'local' | 'team';
 
 export default function AnalyticsScreen() {
-  const [matches, setMatches] = useState<MatchData[]>([]);
-  const [teamMatches, setTeamMatches] = useState<MatchData[]>([]);
-  const [teamAnalytics, setTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+  const [eventKey, setEventKey] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('avgScore');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
@@ -41,79 +41,36 @@ export default function AnalyticsScreen() {
   const [isExporting, setIsExporting] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>('local');
 
-  const loadData = useCallback(async (showRefresh = false) => {
-    try {
-      if (showRefresh) setIsRefreshing(true);
-      else setIsLoading(true);
+  // My Data: load directly from local SQLite, no caching - display immediately
+  const [localMatches, setLocalMatches] = useState<MatchData[]>([]);
+  const [localTeamAnalytics, setLocalTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
 
-      // Get event_key from storage for filtering team data
-      const eventKey = await AsyncStorage.getItem('selected_event_key');
-      
-      if (dataSource === 'local') {
-        // Load from local database
-        // Note: Local database doesn't store event_key, so we can't filter by event
-        const allMatches = await db.getAllMatches();
-        // Exclude admin-deleted matches (fetched from Supabase match_deletions)
-        const deletedIds = await supabaseSyncService.getDeletedMatchIds();
-        const filteredMatches = allMatches.filter((m) => !deletedIds.has(m.id));
-        setMatches(filteredMatches);
-        
-        // Calculate analytics using existing service (manual calculation)
-        if (filteredMatches.length > 0) {
-          const analytics = analyticsService.calculateTeamAnalytics(filteredMatches);
-          setTeamAnalytics(analytics);
-        } else {
-          setTeamAnalytics(new Map());
-        }
-      } else {
-        // Load from Supabase and use same calculation method as local data
-        if (!eventKey) {
-          Alert.alert('No Event Selected', 'Please select an event to view team analytics');
-          setTeamAnalytics(new Map());
-          return;
-        }
+  const teamQuery = useAnalyticsTeam(eventKey);
+  const teamMatches = teamQuery.data?.matches ?? [];
+  const teamTeamAnalytics = teamQuery.data?.teamAnalytics ?? new Map<number, TeamAnalytics>();
 
-        // Fetch matches from Supabase
-        const supabaseMatches = await supabaseSyncService.getAllTeamMatches(eventKey);
-        
-        // Convert Supabase matches to MatchData format
-        const matchesAsMatchData: MatchData[] = supabaseMatches.map((match: any) => ({
-          id: match.id,
-          matchNumber: match.matchNumber,
-          teamNumber: match.teamNumber,
-          scouterId: match.scouterId,
-          gameYear: match.gameYear,
-          metrics: match.metrics,
-          timestamp: match.timestamp,
-          synced: match.synced,
-          notes: match.notes,
-        }));
-        
-        setTeamMatches(matchesAsMatchData);
+  const loadLocalData = useCallback(async () => {
+    const allMatches = await db.getAllMatches();
+    const deletedIds = await supabaseSyncService.getDeletedMatchIds();
+    const filtered = allMatches.filter((m) => !deletedIds.has(m.id));
+    setLocalMatches(filtered);
+    setLocalTeamAnalytics(
+      filtered.length > 0 ? analyticsService.calculateTeamAnalytics(filtered) : new Map()
+    );
+  }, []);
 
-        // Calculate analytics using the same service as local data
-        if (matchesAsMatchData.length > 0) {
-          const analytics = analyticsService.calculateTeamAnalytics(matchesAsMatchData);
-        setTeamAnalytics(analytics);
-      } else {
-        setTeamAnalytics(new Map());
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      Alert.alert('Error', 'Failed to load analytics data');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [dataSource]);
-
-  // Load data when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      AsyncStorage.getItem('selected_event_key').then(setEventKey);
+      loadLocalData();
+    }, [loadLocalData])
   );
+
+  const matches = dataSource === 'local' ? localMatches : teamMatches;
+  const teamAnalytics = dataSource === 'local' ? localTeamAnalytics : teamTeamAnalytics;
+  const isLoading = dataSource === 'local' ? false : teamQuery.isLoading;
+  const isFetching = dataSource === 'local' ? false : teamQuery.isFetching;
+  const refetch = dataSource === 'local' ? loadLocalData : teamQuery.refetch;
 
   const handleClearData = () => {
     Alert.alert(
@@ -126,7 +83,7 @@ export default function AnalyticsScreen() {
           style: 'destructive',
           onPress: async () => {
             await db.clearAllMatches();
-            await loadData();
+            loadLocalData();
             Alert.alert('Success', 'All data cleared');
           },
         },
@@ -146,7 +103,7 @@ export default function AnalyticsScreen() {
           onPress: async () => {
             try {
               await db.deleteMatch(matchId);
-              await loadData();
+              loadLocalData();
               Alert.alert('Success', 'Match deleted successfully');
             } catch (error) {
               console.error('Failed to delete match:', error);
@@ -235,7 +192,10 @@ export default function AnalyticsScreen() {
     try {
       const result = await syncManager.fullSync();
 
-      await loadData(true);
+      loadLocalData();
+      if (eventKey) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.analytics.team(eventKey) });
+      }
 
       Alert.alert(
         'Sync complete',
@@ -733,6 +693,20 @@ export default function AnalyticsScreen() {
     );
   };
 
+  if (dataSource === 'team' && !eventKey) {
+    return (
+      <SafeAreaView style={styles.container} edges={[]}>
+        <View style={styles.emptyState}>
+          <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
+          <Text style={styles.emptyTitle}>No Event Selected</Text>
+          <Text style={styles.emptySubtitle}>
+            Please select an event to view team analytics
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (isLoading) {
     return renderSkeletonLoader();
   }
@@ -781,7 +755,7 @@ export default function AnalyticsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} />
+          <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} />
         }
       >
         {/* Stats Header */}

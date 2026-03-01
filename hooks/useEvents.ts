@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getEventsByYear } from '../api/services/events';
 import { TBAEvent } from '../api/types';
+import { queryKeys } from '../config/queryKeys';
 
 /**
  * React Query hook to fetch events for a given year
@@ -10,7 +11,7 @@ import { TBAEvent } from '../api/types';
  */
 export function useEvents(year: number) {
   return useQuery<TBAEvent[], Error>({
-    queryKey: ['events', year],
+    queryKey: queryKeys.events.byYear(year),
     queryFn: () => getEventsByYear(year),
     staleTime: 10 * 60 * 1000, // 10 minutes
   });

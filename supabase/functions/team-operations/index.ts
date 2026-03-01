@@ -123,6 +123,23 @@ Deno.serve(async (req) => {
             }
           );
         }
+
+        // Check if team already exists to avoid duplicate key and return a clear error
+        const { data: existingTeam } = await supabase
+          .from('teams')
+          .select('id')
+          .eq('team_number', teamNumber)
+          .maybeSingle();
+
+        if (existingTeam) {
+          return new Response(
+            JSON.stringify({ error: 'Team already registered. Please use the team code to log in.' }),
+            {
+              status: 409,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
         
         const adminCode = String(Math.floor(Math.random() * 10_000)).padStart(4, '0');
         

@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getTeam } from '../api/services/teams';
 import { TBATeam } from '../api/types';
+import { queryKeys } from '../config/queryKeys';
 
 /**
  * React Query hook to fetch team information
@@ -10,7 +11,7 @@ import { TBATeam } from '../api/types';
  */
 export function useTeam(teamKey: string | null) {
   return useQuery<TBATeam, Error>({
-    queryKey: ['team', teamKey],
+    queryKey: queryKeys.teams.detail(teamKey ?? ''),
     queryFn: () => {
       if (!teamKey) {
         throw new Error('Team key is required');
@@ -18,7 +19,7 @@ export function useTeam(teamKey: string | null) {
       return getTeam(teamKey);
     },
     enabled: !!teamKey,
-    staleTime: 10 * 60 * 1000, // 10 minutes max
+    staleTime: 10 * 1000, // 10 seconds
   });
 }
 

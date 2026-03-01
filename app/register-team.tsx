@@ -1,9 +1,9 @@
 // app/register-team.tsx - Team Registration Screen
-import { getAllTeams } from '@/api/services/teams';
 import { TBATeam } from '@/api/types';
 import { authService } from '@/services/authService';
+import { useTeamsForRegister } from '@/hooks/useTeamsForRegister';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,155 +19,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const TEAMS_PER_PAGE = 500;
-
 export default function RegisterTeamScreen() {
-  const [allTeams, setAllTeams] = useState<TBATeam[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRegistering, setIsRegistering] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMorePages, setHasMorePages] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Fetch teams from TBA API with pagination
-  const fetchTeams = useCallback(async (pageNum: number, isInitialLoad: boolean = false) => {
-    if (isInitialLoad) {
-      setIsLoading(true);
-    }
-    
-    try {
-      const teams = await getAllTeams(pageNum);
-      
-      if (teams.length === 0) {
-        setHasMorePages(false);
-        if (isInitialLoad) {
-          setIsLoading(false);
-        }
-        return;
-      }
-
-      setAllTeams((prev) => {
-        // Check if we already have teams from this page to avoid duplicates
-        const existingTeamNumbers = new Set(prev.map(t => t.team_number));
-        const newTeams = teams.filter(t => !existingTeamNumbers.has(t.team_number));
-        
-        if (newTeams.length === 0) {
-          return prev; // No new teams, return previous state
-        }
-        
-        // Merge and sort by team_number
-        const merged = [...prev, ...newTeams];
-        return merged.sort((a, b) => a.team_number - b.team_number);
-      });
-
-      // Update current page if this is a higher page number
-      setCurrentPage((prev) => Math.max(prev, pageNum));
-
-      // If we got less than 500 teams, we've reached the end
-      if (teams.length < TEAMS_PER_PAGE) {
-        setHasMorePages(false);
-      }
-      
-      if (isInitialLoad) {
-        setIsLoading(false);
-      }
-    } catch (err) {
-      console.error('Error fetching teams:', err);
-      setError('Failed to load teams. Please try again.');
-      setIsLoading(false);
-    }
-  }, []);
-
-  // Load initial teams - load enough pages to cover all FRC teams (up to ~9000+)
-  const loadInitialTeams = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setAllTeams([]);
-    setCurrentPage(0);
-    setHasMorePages(true);
-    
-    // Load pages in batches to cover all FRC teams (currently up to ~9000+)
-    // Each page has ~500 teams, so 20 pages covers ~10,000 teams
-    try {
-      // Load pages in batches to avoid too many parallel requests
-      const totalPagesToLoad = 20;
-      const batchSize = 5; // Load 5 pages at a time
-      const allResults: TBATeam[][] = [];
-      
-      for (let i = 0; i < totalPagesToLoad; i += batchSize) {
-        const pages = [];
-        for (let j = i; j < Math.min(i + batchSize, totalPagesToLoad); j++) {
-          pages.push(j);
-        }
-        
-        const promises = pages.map((page) => getAllTeams(page));
-        const batchResults = await Promise.all(promises);
-        allResults.push(...batchResults);
-        
-        // Update current page as we load
-        setCurrentPage(Math.min(i + batchSize - 1, totalPagesToLoad - 1));
-      }
-      
-      // Flatten and deduplicate
-      const all = allResults.flat();
-      const unique = all.filter(
-        (team, index, self) =>
-          index === self.findIndex((t) => t.team_number === team.team_number)
-      );
-      
-      setAllTeams(unique.sort((a, b) => a.team_number - b.team_number));
-      setCurrentPage(totalPagesToLoad - 1);
-      
-      // Check if there are more pages (if last page had 500 teams, there might be more)
-      const lastPageResults = allResults[allResults.length - 1];
-      if (lastPageResults?.length === TEAMS_PER_PAGE) {
-        setHasMorePages(true);
-      } else {
-        setHasMorePages(false);
-      }
-    } catch (err) {
-      console.error('Error loading initial teams:', err);
-      setError('Failed to load teams. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadInitialTeams();
-  }, [loadInitialTeams]);
-
-  // Load additional pages if searching for a team number not yet loaded
-  useEffect(() => {
-    if (!searchQuery.trim()) return;
-
-    const query = searchQuery.trim();
-    const isNumericQuery = /^\d+$/.test(query);
-    
-    if (isNumericQuery) {
-      const teamNumber = parseInt(query, 10);
-      if (!isNaN(teamNumber) && teamNumber > 0) {
-        // Check if this team is already in our loaded teams
-        const teamExists = allTeams.some(t => t.team_number === teamNumber);
-        
-        if (!teamExists) {
-          // Estimate which page this team would be on (approximately)
-          const estimatedPage = Math.floor(teamNumber / TEAMS_PER_PAGE);
-          
-          // If we haven't loaded this page yet and it's reasonable (within ~30 pages)
-          if (estimatedPage > currentPage && estimatedPage < 30 && !isLoading) {
-            // Load the estimated page and adjacent pages
-            fetchTeams(estimatedPage, false);
-            if (estimatedPage > 0) {
-              fetchTeams(estimatedPage - 1, false);
-            }
-            fetchTeams(estimatedPage + 1, false);
-          }
-        }
-      }
-    }
-  }, [searchQuery, allTeams, currentPage, isLoading, fetchTeams]);
+  const { allTeams, isLoading, isFetching, error, refetch } = useTeamsForRegister();
 
   // Filter teams based on search query
   const filteredTeams = useMemo(() => {
@@ -233,15 +88,6 @@ export default function RegisterTeamScreen() {
       setIsRegistering(false);
     }
   };
-
-  // Load more teams when scrolling
-  const handleLoadMore = useCallback(() => {
-    if (!isLoading && hasMorePages && !searchQuery.trim()) {
-      const nextPage = currentPage + 1;
-      setCurrentPage(nextPage);
-      fetchTeams(nextPage, false);
-    }
-  }, [isLoading, hasMorePages, currentPage, searchQuery, fetchTeams]);
 
   // Skeleton loader component
   const SkeletonBox = ({ width, height, style }: { width?: number | string; height: number; style?: any }) => {
@@ -331,10 +177,10 @@ export default function RegisterTeamScreen() {
 
           {error && (
             <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorText}>Failed to load teams. Please try again.</Text>
               <TouchableOpacity
                 style={styles.retryButton}
-                onPress={loadInitialTeams}
+                onPress={() => refetch()}
               >
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
@@ -349,8 +195,6 @@ export default function RegisterTeamScreen() {
               renderItem={renderTeamCard}
               keyExtractor={(item) => item.key}
               contentContainerStyle={styles.listContent}
-              onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.5}
               keyboardShouldPersistTaps="handled"
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
@@ -362,7 +206,7 @@ export default function RegisterTeamScreen() {
                 </View>
               }
               ListFooterComponent={
-                isLoading && allTeams.length > 0 ? (
+                isFetching && allTeams.length > 0 ? (
                   <View style={styles.footerLoader}>
                     <ActivityIndicator size="small" color="#ff6600" />
                   </View>

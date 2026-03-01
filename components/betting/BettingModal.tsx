@@ -1,5 +1,6 @@
 // components/betting/BettingModal.tsx
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,6 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { TBAMatch } from '../../api/types';
 import { BetData, bettingService, MatchOdds } from '../../services/bettingService';
 import { useEbucksStore } from '../../stores/ebucksStore';
+import { queryKeys } from '../../config/queryKeys';
 
 interface BettingModalProps {
   visible: boolean;
@@ -29,6 +31,7 @@ interface BettingModalProps {
 type BetTab = 'winner' | 'margin' | 'over_under' | 'parlay';
 
 export default function BettingModal({ visible, onClose, match, eventKey }: BettingModalProps) {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<BetTab>('winner');
   const [isLoadingOdds, setIsLoadingOdds] = useState(true);
   const [odds, setOdds] = useState<MatchOdds | null>(null);
@@ -276,7 +279,8 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
 
       Alert.alert('Bet Placed!', `Your bet of ${amount} ebucks has been placed. Potential payout: ${betData.potentialPayout} ebucks.`);
       
-      // Refresh balance
+      // Invalidate bets so history tab shows the new bet
+      queryClient.invalidateQueries({ queryKey: queryKeys.bets.all });
       await refreshBalance();
       
       // Reset form

@@ -1,7 +1,7 @@
 // app/(tabs)/betting-history.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import {
     Animated,
     RefreshControl,
@@ -12,161 +12,69 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bet, bettingService } from '../../services/bettingService';
+import { Bet } from '../../services/bettingService';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
-import { useBetNotificationStore } from '../../stores/betNotificationStore';
 import { useEbucksStore } from '../../stores/ebucksStore';
-
-interface LeaderboardEntry {
-  scout_name: string;
-  balance: number;
-  rank: number;
-}
+import { useUserBets } from '../../hooks/useUserBets';
+import { useLeaderboard } from '../../hooks/useLeaderboard';
+import { queryKeys } from '../../config/queryKeys';
 
 export default function BettingHistoryScreen() {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'history' | 'leaderboard'>('history');
-  const [bets, setBets] = useState<Bet[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'won' | 'lost'>('all');
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
-  
+  const user = useAuthStore((state) => state.user);
   const balance = useEbucksStore((state) => state.balance);
   const refreshBalance = useEbucksStore((state) => state.refreshBalance);
-  const user = useAuthStore((state) => state.user);
-  const showBetNotification = useBetNotificationStore((state) => state.showNotification);
   const subscriptionRef = useRef<any>(null);
   const prevBalanceRef = useRef<number>(balance);
 
-  const loadBets = useCallback(async (showRefresh = false) => {
-    try {
-      if (showRefresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
+  const betsQuery = useUserBets();
+  const leaderboardQuery = useLeaderboard(user?.teamNumber ?? null);
+  const bets = betsQuery.data ?? [];
+  const leaderboard = leaderboardQuery.data ?? [];
 
-      const allBets = await bettingService.getUserBets();
-      
-      // Check and resolve pending bets
-      const pendingBets = allBets.filter(b => b.status === 'pending');
-      let firstResolution: { matchNumber: number; won: boolean; payout: number } | null = null;
-      for (const bet of pendingBets) {
-        try {
-          const resolutions = await bettingService.checkAndResolveBets(bet.matchKey);
-          if (!firstResolution && resolutions?.[0]) {
-            firstResolution = resolutions[0];
-          }
-        } catch (error) {
-          console.error(`Error resolving bet ${bet.id}:`, error);
-        }
-      }
-      if (firstResolution) {
-        showBetNotification(firstResolution);
-      }
-
-      // Reload bets after resolution
-      const updatedBets = await bettingService.getUserBets();
-      setBets(updatedBets);
-      
-      // Refresh balance to get latest
-      await refreshBalance();
-    } catch (error) {
-      console.error('Error loading bets:', error);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [refreshBalance, showBetNotification]);
-
-  const loadLeaderboard = useCallback(async () => {
-    try {
-      setIsLoadingLeaderboard(true);
-      
-      if (!user?.teamNumber) {
-        console.error('No team number found');
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('user_ebucks_balance')
-        .select('scout_name, balance')
-        .eq('team_number', user.teamNumber)
-        .order('balance', { ascending: false });
-
-      if (error) {
-        console.error('Error loading leaderboard:', error);
-        return;
-      }
-
-      // Add rank to each entry
-      const leaderboardData: LeaderboardEntry[] = (data || []).map((entry, index) => ({
-        scout_name: entry.scout_name || 'Unknown',
-        balance: entry.balance || 0,
-        rank: index + 1,
-      }));
-
-      setLeaderboard(leaderboardData);
-    } catch (error) {
-      console.error('Error loading leaderboard:', error);
-    } finally {
-      setIsLoadingLeaderboard(false);
-    }
-  }, [user?.teamNumber]);
-
-  // Set up real-time subscription for leaderboard updates (Broadcast — scalable, no Postgres Changes/WAL usage)
+  // Set up real-time subscription for leaderboard updates
   useEffect(() => {
-    if (activeTab !== 'leaderboard' || !user?.teamNumber) {
-      return;
-    }
-
+    if (activeTab !== 'leaderboard' || !user?.teamNumber) return;
     const channelName = `leaderboard:${user.teamNumber}`;
-
     const onLeaderboardChange = () => {
-      loadLeaderboard();
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.bets.leaderboard(user.teamNumber),
+      });
     };
-
     const channel = supabase
       .channel(channelName)
       .on('broadcast', { event: 'INSERT' }, onLeaderboardChange)
       .on('broadcast', { event: 'UPDATE' }, onLeaderboardChange)
       .on('broadcast', { event: 'DELETE' }, onLeaderboardChange)
       .subscribe();
-
     subscriptionRef.current = channel;
-
     return () => {
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current);
         subscriptionRef.current = null;
       }
     };
-  }, [activeTab, user?.teamNumber, loadLeaderboard]);
+  }, [activeTab, user?.teamNumber, queryClient]);
 
-  // Watch for balance changes and refresh leaderboard
+  // Invalidate leaderboard when balance changes (user may have won/lost a bet)
   useEffect(() => {
-    // Only refresh if balance actually changed and we're on leaderboard tab
     if (activeTab === 'leaderboard' && prevBalanceRef.current !== balance) {
       prevBalanceRef.current = balance;
-      // Small delay to ensure database is updated
       const timeoutId = setTimeout(() => {
-        loadLeaderboard();
+        if (user?.teamNumber) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.bets.leaderboard(user.teamNumber),
+          });
+        }
+        refreshBalance();
       }, 500);
       return () => clearTimeout(timeoutId);
     }
     prevBalanceRef.current = balance;
-  }, [balance, activeTab, loadLeaderboard]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadBets();
-      if (activeTab === 'leaderboard') {
-        loadLeaderboard();
-      }
-    }, [loadBets, activeTab, loadLeaderboard])
-  );
+  }, [balance, activeTab, user?.teamNumber, queryClient, refreshBalance]);
 
   const filteredBets = bets.filter(bet => {
     if (filter === 'all') return true;
@@ -364,10 +272,7 @@ export default function BettingHistoryScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.mainTab, activeTab === 'leaderboard' && styles.mainTabActive]}
-          onPress={() => {
-            setActiveTab('leaderboard');
-            loadLeaderboard();
-          }}
+          onPress={() => setActiveTab('leaderboard')}
         >
           <Text
             style={[
@@ -381,7 +286,7 @@ export default function BettingHistoryScreen() {
       </View>
 
       {activeTab === 'history' ? (
-        isLoading ? (
+        betsQuery.isLoading ? (
           renderHistorySkeleton()
         ) : (
         <>
@@ -410,7 +315,10 @@ export default function BettingHistoryScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => loadBets(true)} />
+          <RefreshControl
+            refreshing={betsQuery.isFetching}
+            onRefresh={() => betsQuery.refetch()}
+          />
         }
       >
         {filteredBets.length === 0 ? (
@@ -490,7 +398,7 @@ export default function BettingHistoryScreen() {
         </>
         )
       ) : (
-        isLoadingLeaderboard ? (
+        leaderboardQuery.isLoading ? (
           renderLeaderboardSkeleton()
         ) : (
         <ScrollView
@@ -498,9 +406,11 @@ export default function BettingHistoryScreen() {
           contentContainerStyle={styles.scrollContent}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshing}
+              refreshing={leaderboardQuery.isFetching}
               onRefresh={() => {
-                loadLeaderboard();
+                queryClient.invalidateQueries({
+                  queryKey: queryKeys.bets.leaderboard(user?.teamNumber ?? ''),
+                });
                 refreshBalance();
               }}
             />

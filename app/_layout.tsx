@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { MatchesCacheHydrator } from '@/components/MatchesCacheHydrator';
 import { UpdateAppModal } from '@/components/UpdateAppModal';
 import { useColorScheme } from '@/components/useColorScheme';
 import { queryClient } from '@/config/queryClient';
@@ -58,20 +59,14 @@ export default Sentry.wrap(function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
   if (!loaded) {
     return null;
   }
 
-  return <RootLayoutNav />;
+  return <RootLayoutNav onReadyToHideSplash={SplashScreen.hideAsync} />;
 });
 
-function RootLayoutNav() {
+function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => void }) {
   const colorScheme = useColorScheme();
   const { isAuthenticated, user, isLoading, checkAuth } = useAuthStore();
   const initializeEbucks = useEbucksStore((state) => state.initialize);
@@ -80,6 +75,13 @@ function RootLayoutNav() {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Hide splash only when auth check is complete (avoids black flash between splash and first screen)
+  useEffect(() => {
+    if (!isLoading) {
+      onReadyToHideSplash();
+    }
+  }, [isLoading, onReadyToHideSplash]);
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -104,6 +106,7 @@ function RootLayoutNav() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <QueryClientProvider client={queryClient}>
+      <MatchesCacheHydrator />
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <UpdateAppModal
             visible={showModal}

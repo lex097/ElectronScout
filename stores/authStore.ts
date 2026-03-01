@@ -38,6 +38,18 @@ async function getTokenExpiresAt(): Promise<number | null> {
   return s ? parseInt(s, 10) : null;
 }
 
+function isNetworkError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes('fetch') ||
+    msg.includes('network') ||
+    msg.includes('Network') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('Failed to fetch')
+  );
+}
+
 async function getAccessTokenForSupabase(): Promise<string | null> {
   const token = await getStoredAccessToken();
   const expiresAt = await getTokenExpiresAt();
@@ -52,9 +64,12 @@ async function getAccessTokenForSupabase(): Promise<string | null> {
         await AsyncStorage.setItem(ACCESS_TOKEN_KEY, newToken);
         await AsyncStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(Math.floor(Date.now() / 1000) + expiresIn));
         return newToken;
-      } catch {
-        await useAuthStore.getState().logout();
-        return null;
+      } catch (error) {
+        // Only logout on auth errors (invalid/expired refresh token), not network errors
+        if (!isNetworkError(error)) {
+          await useAuthStore.getState().logout();
+        }
+        return token; // Return existing token when offline so user stays logged in
       }
     }
     await useAuthStore.getState().logout();
@@ -119,10 +134,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
             const res = await edgeFunctions.refreshToken(refreshToken);
             await AsyncStorage.setItem(ACCESS_TOKEN_KEY, res.access_token);
             await AsyncStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(Math.floor(Date.now() / 1000) + (res.expires_in ?? 86400)));
-          } catch {
-            await get().logout();
-            set({ isLoading: false });
-            return;
+          } catch (error) {
+            // Only logout on auth errors, not network errors (offline)
+            if (!isNetworkError(error)) {
+              await get().logout();
+              set({ isLoading: false });
+              return;
+            }
+            // Network error: stay logged in with stored tokens, refresh when back online
           }
         }
 

@@ -1,7 +1,10 @@
 // app/login.tsx - Login Screen
 import { authService } from '@/services/authService';
+import { queryClient } from '@/config/queryClient';
+import { queryKeys } from '@/config/queryKeys';
+import { getAllTeams } from '@/api/services/teams';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -67,6 +70,18 @@ export default function LoginScreen() {
   const handleRegisterTeam = () => {
     router.push('/register-team' as any);
   };
+
+  // Prefetch first 5 pages of teams in background so register page loads instantly
+  useEffect(() => {
+    const PREFETCH_PAGES = 5;
+    for (let i = 0; i < PREFETCH_PAGES; i++) {
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.teams.list(i),
+        queryFn: () => getAllTeams(i),
+        staleTime: 10 * 1000,
+      });
+    }
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
