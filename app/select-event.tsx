@@ -3,6 +3,7 @@ import { useEvents } from '@/hooks/useEvents';
 import { queryClient } from '@/config/queryClient';
 import { queryKeys } from '@/config/queryKeys';
 import { matchesCacheService } from '@/services/matchesCacheService';
+import { useDemoStore } from '@/stores/demoStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -18,17 +19,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 
-const CURRENT_YEAR = ACTIVE_GAME_CONFIG.year;
-
 const getLocationString = (event: any) => {
   const parts = [event.city, event.state_prov, event.country].filter(Boolean);
   return parts.join(', ') || 'Location TBD';
 };
 
 export default function SelectEventScreen() {
-  const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
+  const effectiveYear = isDemoMode ? ACTIVE_GAME_CONFIG.year - 1 : ACTIVE_GAME_CONFIG.year;
   const [searchQuery, setSearchQuery] = useState('');
-  const { data: events, isLoading, error } = useEvents(selectedYear);
+  const { data: events, isLoading, error } = useEvents(effectiveYear);
 
   // Filter events based on search query (real-time filtering)
   const filteredEvents = useMemo(() => {
@@ -113,7 +113,7 @@ export default function SelectEventScreen() {
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyTitle}>No Events Found</Text>
           <Text style={styles.emptyText}>
-            No events found for {selectedYear}. Please try a different year.
+            No events found for {effectiveYear}. Please try a different year.
           </Text>
           <TouchableOpacity
             style={styles.backButton}
@@ -130,7 +130,7 @@ export default function SelectEventScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Select Event</Text>
-        <Text style={styles.subtitle}>{selectedYear} Season</Text>
+        <Text style={styles.subtitle}>{effectiveYear} Season{isDemoMode ? ' (Demo)' : ''}</Text>
       </View>
 
       {/* Search Bar */}

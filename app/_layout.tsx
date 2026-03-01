@@ -14,6 +14,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { queryClient } from '@/config/queryClient';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
 import { useAuthStore } from '@/stores/authStore';
+import { useDemoStore } from '@/stores/demoStore';
 import { useEbucksStore } from '@/stores/ebucksStore';
 import * as Sentry from '@sentry/react-native';
 
@@ -70,11 +71,13 @@ function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => voi
   const colorScheme = useColorScheme();
   const { isAuthenticated, user, isLoading, checkAuth } = useAuthStore();
   const initializeEbucks = useEbucksStore((state) => state.initialize);
+  const initializeDemo = useDemoStore((state) => state.initialize);
   const { showModal, storeUrl, latestVersion, dismissModal } = useVersionCheck();
 
   useEffect(() => {
     checkAuth();
-  }, []);
+    initializeDemo();
+  }, [checkAuth, initializeDemo]);
 
   // Hide splash only when auth check is complete (avoids black flash between splash and first screen)
   useEffect(() => {

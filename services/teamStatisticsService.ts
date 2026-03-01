@@ -1,7 +1,7 @@
 // services/teamStatisticsService.ts
+import { getEffectiveYear } from '@/stores/demoStore';
 import { supabase } from '@/lib/supabase';
 import { getTeamYearEPABatch } from '../api/services/statbotics';
-import { ACTIVE_GAME_CONFIG } from '../config/gameConfig';
 import { supabaseSyncService } from './supabase.sync';
 
 export interface TeamStatistics {
@@ -248,7 +248,7 @@ class TeamStatisticsService {
         
         if (teamsNeedingEPA.length > 0) {
           try {
-            const year = ACTIVE_GAME_CONFIG.year;
+            const year = getEffectiveYear();
             const epaMap = await getTeamYearEPABatch(teamsNeedingEPA, year);
 
             teamsNeedingEPA.forEach((teamNumber) => {
@@ -340,7 +340,7 @@ class TeamStatisticsService {
       let epaMapForStdev = new Map<number, { mean: number; sd?: number }>();
       if (teamsNeedingEPA.length > 0) {
         try {
-          const year = ACTIVE_GAME_CONFIG.year;
+          const year = getEffectiveYear();
           const epaMap = await getTeamYearEPABatch(teamsNeedingEPA, year);
           epaMap.forEach((epa, tn) => {
             const tp = epa.epa?.total_points;
@@ -393,7 +393,7 @@ class TeamStatisticsService {
       const missingTeams = teamNumbers.filter(tn => !statsMap.has(tn));
       if (missingTeams.length > 0) {
         try {
-          const year = ACTIVE_GAME_CONFIG.year;
+          const year = getEffectiveYear();
           const epaMap = await getTeamYearEPABatch(missingTeams, year);
           epaMap.forEach((epa, tn) => {
             const tp = epa.epa?.total_points;
@@ -429,7 +429,7 @@ class TeamStatisticsService {
       const teamsToFetchEPA = teamsNeedingEPAForStdev.filter(tn => !epaMapForStdev.has(tn));
       if (teamsToFetchEPA.length > 0) {
         try {
-          const year = ACTIVE_GAME_CONFIG.year;
+          const year = getEffectiveYear();
           const epaMap = await getTeamYearEPABatch(teamsToFetchEPA, year);
           epaMap.forEach((epa, tn) => {
             const tp = epa.epa?.total_points;
@@ -465,7 +465,7 @@ class TeamStatisticsService {
       const epaMapForErrorFallback = new Map<number, number | null>();
       if (teamsStillMissing.length > 0) {
         try {
-          const year = ACTIVE_GAME_CONFIG.year;
+          const year = getEffectiveYear();
           
           const epaMap = await getTeamYearEPABatch(teamsStillMissing, year);
           epaMap.forEach((epa, tn) => {
@@ -501,7 +501,7 @@ class TeamStatisticsService {
         .map(([tn]) => tn);
       if (teamsNeedingEPAForStdevErr.length > 0) {
         try {
-          const epaMap = await getTeamYearEPABatch(teamsNeedingEPAForStdevErr, ACTIVE_GAME_CONFIG.year);
+          const epaMap = await getTeamYearEPABatch(teamsNeedingEPAForStdevErr, getEffectiveYear());
           epaMap.forEach((epa, tn) => {
             epaMapForErrorFallback.set(tn, epa.epa?.total_points?.sd ?? null);
           });

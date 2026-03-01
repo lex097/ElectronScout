@@ -10,6 +10,7 @@ import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, NativeScrollEvent, N
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
 import { ACTIVE_GAME_CONFIG, getDefaultsForPhases, getInitialMatchData, Metric } from '../../config/gameConfig';
+import { getEffectiveYear, useDemoStore } from '../../stores/demoStore';
 import { bettingService } from '../../services/bettingService';
 import { db } from '../../services/database';
 import { useAuthStore } from '../../stores/authStore';
@@ -23,6 +24,7 @@ const SELECTED_EVENT_NAME_KEY = 'selected_event_name';
 const SELECTED_MATCH_KEY = 'selected_match_key';
 const SELECTED_MATCH_NUMBER_KEY = 'selected_match_number';
 const SELECTED_TEAM_NUMBER_KEY = 'selected_team_number';
+const EVENT_KEYS = ['selected_event_key', 'selected_event_name'];
 
 export default function MatchScoutScreen() {
   const params = useLocalSearchParams<{
@@ -364,6 +366,22 @@ export default function MatchScoutScreen() {
     router.push('/select-event' as any);
   };
 
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
+  const toggleDemoMode = useDemoStore((s) => s.toggleDemoMode);
+  const handleToggleDemoMode = useCallback(async () => {
+    await toggleDemoMode();
+    await AsyncStorage.multiRemove(EVENT_KEYS);
+    await matchesCacheService.clear();
+    queryClient.invalidateQueries({ queryKey: queryKeys.events.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.matches.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.teamStatistics.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.picklists.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.bets.all });
+    queryClient.invalidateQueries({ queryKey: ['rankings'] });
+    setSelectedEventName(null);
+  }, [toggleDemoMode]);
+
   const resetMatchAndTimerState = useCallback(() => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -650,7 +668,7 @@ export default function MatchScoutScreen() {
         matchNumber: parseInt(matchNumber),
         teamNumber: parseInt(teamNumber),
         scouterId: scoutName || 'unknown',
-        gameYear: ACTIVE_GAME_CONFIG.year,
+        gameYear: getEffectiveYear(),
         metrics,
         timestamp: Date.now(),
         synced: false,
@@ -751,6 +769,14 @@ export default function MatchScoutScreen() {
         {/* Match Info */}
         {isTBAMode ? (
           <View style={styles.tbaInfoContainer}>
+            <TouchableOpacity
+              style={[styles.demoModeButton, isDemoMode && styles.demoModeButtonActive]}
+              onPress={handleToggleDemoMode}
+            >
+              <Text style={[styles.demoModeButtonText, isDemoMode && styles.demoModeButtonTextActive]}>
+                {isDemoMode ? 'Demo Mode: On' : 'Demo Mode: Off'}
+              </Text>
+            </TouchableOpacity>
             {selectedEventName ? (
               <View style={styles.tbaInfoCard}>
                 <Text style={styles.tbaInfoLabel}>Event</Text>
@@ -1216,6 +1242,28 @@ const styles = {
   },
   tbaInfoContainer: {
     marginBottom: 16,
+  },
+  demoModeButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#404040',
+  },
+  demoModeButtonActive: {
+    backgroundColor: '#3a2a1a',
+    borderColor: '#ff6600',
+  },
+  demoModeButtonText: {
+    color: '#b0b0b0',
+    fontSize: 13,
+    fontWeight: '600' as const,
+  },
+  demoModeButtonTextActive: {
+    color: '#ff6600',
   },
   tbaInfoCard: {
     backgroundColor: '#2a2a2a',
