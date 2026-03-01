@@ -45,6 +45,7 @@ export default function MatchScoutScreen() {
   const [autonomousTimeRemaining, setAutonomousTimeRemaining] = useState<number | null>(null);
   const [showCountdownToast, setShowCountdownToast] = useState(false);
   const [autonomousTimerCompleted, setAutonomousTimerCompleted] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const prevMatchNumberRef = useRef<string>('');
@@ -83,6 +84,16 @@ export default function MatchScoutScreen() {
       allPhases: ACTIVE_GAME_CONFIG.phases.map(p => ({ id: p.id, duration: p.duration }))
     });
   }, [autonomousPhase, autonomousDuration]);
+
+  // Track keyboard visibility so "Click to Begin Match" dismisses keyboard instead of starting when typing
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setIsKeyboardVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setIsKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     // Initialize database on mount
@@ -920,7 +931,13 @@ export default function MatchScoutScreen() {
             <TouchableOpacity
               style={styles.beginMatchOverlay}
               activeOpacity={1}
-              onPress={startMatch}
+              onPress={() => {
+                if (isKeyboardVisible) {
+                  Keyboard.dismiss();
+                } else {
+                  startMatch();
+                }
+              }}
             >
               <View style={styles.beginMatchButton}>
                 <Text style={styles.beginMatchButtonText}>Click to Begin Match</Text>

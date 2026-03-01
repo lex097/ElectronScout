@@ -270,18 +270,18 @@ export class SyncManager {
   }> {
     try {
       const unsyncedMatches = await db.getUnsyncedMatches();
-      
-      if (unsyncedMatches.length === 0) {
+
+      let result = { success: 0, failed: 0, skipped: 0 };
+      if (unsyncedMatches.length > 0) {
+        console.log(`Starting sync of ${unsyncedMatches.length} matches`);
+        result = await this.batchUpload(unsyncedMatches);
+      } else {
         console.log('No matches to sync');
-        return { success: 0, failed: 0, skipped: 0 };
       }
 
-      console.log(`Starting sync of ${unsyncedMatches.length} matches`);
-      const result = await this.batchUpload(unsyncedMatches);
-
+      // Always remove synced matches from local DB (including leftovers from previous runs)
       const allMatches = await db.getAllMatches();
       const syncedMatches = allMatches.filter(match => match.synced);
-
       if (syncedMatches.length > 0) {
         await Promise.all(syncedMatches.map(match => db.deleteMatch(match.id)));
         console.log(`🧹 Removed ${syncedMatches.length} synced matches from local DB`);

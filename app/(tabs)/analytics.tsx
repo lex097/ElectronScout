@@ -192,7 +192,7 @@ export default function AnalyticsScreen() {
     try {
       const result = await syncManager.fullSync();
 
-      loadLocalData();
+      await loadLocalData();
       if (eventKey) {
         queryClient.invalidateQueries({ queryKey: queryKeys.analytics.team(eventKey) });
       }
