@@ -733,9 +733,12 @@ export default function MatchScoutScreen() {
           }
         ]
       );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save match data');
-      console.error(error);
+    } catch (error: any) {
+      const errMsg = error?.message ?? String(error);
+      const errStack = error?.stack;
+      console.error('[Save Match] Failed:', errMsg, errStack || '');
+      const shortMsg = errMsg.length > 80 ? `${errMsg.slice(0, 77)}...` : errMsg;
+      Alert.alert('Error', `Failed to save match data: ${shortMsg}`);
     } finally {
       setIsSaving(false);
     }

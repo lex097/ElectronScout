@@ -46,12 +46,10 @@ export async function getTeamYearEPA(
     if (error.response?.status === 404) {
       return null;
     }
-    console.error(`[Statbotics] Error fetching EPA for team ${teamNumber}:`, {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      message: error.message,
-      data: error.response?.data,
-    });
+    // Only log non-404 errors; avoid noisy timeout messages (client interceptor already logs)
+    if (error.code !== 'ECONNABORTED' && error.response?.status !== 404) {
+      console.warn(`[Statbotics] Error for team ${teamNumber}:`, error.message);
+    }
     return null;
   }
 }
@@ -77,11 +75,17 @@ export async function getTeamYearEPABatch(
   }
 
   const epaMap = new Map<number, StatboticsTeamYear>();
-  const fetchPromises = teamNumbers.map(async (teamNumber) => {
-    const epa = await getTeamYearEPA(teamNumber, year);
-    if (epa) epaMap.set(teamNumber, epa);
-  });
-  await Promise.allSettled(fetchPromises);
+  // Throttle to 2 concurrent requests to avoid Statbotics timeouts/rate limits
+  const CONCURRENCY = 3;
+  for (let i = 0; i < teamNumbers.length; i += CONCURRENCY) {
+    const chunk = teamNumbers.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (teamNumber) => {
+        const epa = await getTeamYearEPA(teamNumber, year);
+        if (epa) epaMap.set(teamNumber, epa);
+      })
+    );
+  }
 
   epaCache.set(cacheKey, { data: new Map(epaMap), fetchedAt: now });
   return epaMap;

@@ -4,17 +4,60 @@ import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'frc_scout.db';
 
+/** Detect expo-sqlite Android NullPointerException (native handle becomes invalid) */
+function isConnectionInvalidError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes('prepareAsync') ||
+    msg.includes('NullPointerException') ||
+    msg.includes('ERR_UNEXPECTED')
+  );
+}
+
 class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
-  // Initialize database
+  // Initialize database (idempotent - safe to call multiple times)
   async init(): Promise<void> {
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      try {
+        this.db = await SQLite.openDatabaseAsync(DB_NAME);
+        await this.createTables();
+        console.log('Database initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize database:', error);
+        this.initPromise = null;
+        throw error;
+      }
+    })();
+    return this.initPromise;
+  }
+
+  /** Reset connection and invalidate initPromise (call when native handle becomes invalid) */
+  private resetConnection(): void {
+    this.db = null;
+    this.initPromise = null;
+    console.warn('[Database] Connection reset due to invalid native handle');
+  }
+
+  /** Ensure DB is ready before operations (call before saveMatch etc.) */
+  async ensureReady(): Promise<void> {
+    if (this.db) return;
+    await this.init();
+  }
+
+  /** Run a DB operation with retry on invalid connection (Android NullPointerException) */
+  private async runWithRetry<T>(operation: () => Promise<T>): Promise<T> {
     try {
-      this.db = await SQLite.openDatabaseAsync(DB_NAME);
-      await this.createTables();
-      console.log('Database initialized successfully');
+      return await operation();
     } catch (error) {
-      console.error('Failed to initialize database:', error);
+      if (isConnectionInvalidError(error)) {
+        this.resetConnection();
+        await this.init();
+        return await operation();
+      }
       throw error;
     }
   }
@@ -44,24 +87,26 @@ class DatabaseService {
 
   // Save a match (insert or update)
   async saveMatch(match: MatchData): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
-
-    await this.db.runAsync(
-      `INSERT OR REPLACE INTO matches 
-       (id, match_number, team_number, scouter_id, game_year, metrics, timestamp, synced, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        match.id,
-        match.matchNumber,
-        match.teamNumber,
-        match.scouterId,
-        match.gameYear,
-        JSON.stringify(match.metrics),
-        match.timestamp,
-        match.synced ? 1 : 0,
-        match.notes || null
-      ]
-    );
+    await this.ensureReady();
+    await this.runWithRetry(async () => {
+      if (!this.db) throw new Error('Database not initialized');
+      await this.db.runAsync(
+        `INSERT OR REPLACE INTO matches 
+         (id, match_number, team_number, scouter_id, game_year, metrics, timestamp, synced, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          match.id,
+          match.matchNumber,
+          match.teamNumber,
+          match.scouterId,
+          match.gameYear,
+          JSON.stringify(match.metrics),
+          match.timestamp,
+          match.synced ? 1 : 0,
+          match.notes || null
+        ]
+      );
+    });
   }
 
   // Get all matches

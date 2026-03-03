@@ -9,7 +9,7 @@ const STATBOTICS_BASE_URL = 'https://api.statbotics.io/v3';
  */
 const statboticsClient: AxiosInstance = axios.create({
   baseURL: STATBOTICS_BASE_URL,
-  timeout: 10000, // 10 seconds
+  timeout: 20000, // 20 seconds - Statbotics can be slow under load
 });
 
 /**
@@ -42,8 +42,10 @@ statboticsClient.interceptors.response.use(
         error.response.data
       );
     } else if (error.request) {
-      // Request made but no response received
-      console.error('[Statbotics API] No response received:', error.request);
+      // Request made but no response received (timeout, network error, etc.)
+      const url = (error.request as { _url?: string })._url ?? error.config?.url ?? 'unknown';
+      const msg = (error.request as { _response?: string })._response ?? error.message ?? 'No response';
+      console.warn(`[Statbotics API] ${msg}: ${url}`);
     } else {
       // Error setting up request
       console.error('[Statbotics API] Request setup error:', error.message);

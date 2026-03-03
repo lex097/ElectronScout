@@ -30,11 +30,14 @@ interface BettingModalProps {
 
 type BetTab = 'winner' | 'margin' | 'over_under' | 'parlay';
 
+const INSUFFICIENT_DATA_MSG = 'There isn\'t enough data to calculate odds for this section. Need at least 2 teams with data (manually scouted or Statbotics) per alliance.';
+
 export default function BettingModal({ visible, onClose, match, eventKey }: BettingModalProps) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<BetTab>('winner');
   const [isLoadingOdds, setIsLoadingOdds] = useState(true);
   const [odds, setOdds] = useState<MatchOdds | null>(null);
+  const [hasFullOdds, setHasFullOdds] = useState(true);
   const [betAmount, setBetAmount] = useState('');
   const [isPlacingBet, setIsPlacingBet] = useState(false);
   const insets = useSafeAreaInsets();
@@ -67,18 +70,11 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   const redTeams = match.alliances.red.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
   const blueTeams = match.alliances.blue.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
 
-  // Load odds when modal opens; use cache for instant reopen of same match
+  // Load odds when modal opens; uses single optimized fetch (eligibility + odds in one pass)
   useEffect(() => {
     if (visible) {
-      const cached = bettingService.getCachedOdds(redTeams, blueTeams, eventKey, match.key);
-      if (cached) {
-        setOdds(cached);
-        setIsLoadingOdds(false);
-      } else {
-        loadOdds();
-      }
+      loadBettingData();
     } else {
-      // Reset state when closing
       setActiveTab('winner');
       setBetAmount('');
       setSelectedAlliance(null);
@@ -91,14 +87,30 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
     }
   }, [visible, eventKey, match.key]);
 
-  const loadOdds = async () => {
+  const loadBettingData = async () => {
     setIsLoadingOdds(true);
     try {
-      const matchOdds = await bettingService.calculateMatchOdds(redTeams, blueTeams, eventKey, match.key);
-      setOdds(matchOdds);
+      const { hasFullOdds: full, odds: o } = await bettingService.getBettingDataOrFallback(
+        redTeams,
+        blueTeams,
+        eventKey,
+        match.key
+      );
+      setHasFullOdds(full);
+      setOdds(o);
     } catch (error) {
-      console.error('Error loading odds:', error);
+      console.error('Error loading betting data:', error);
       Alert.alert('Error', 'Failed to load betting odds');
+      setHasFullOdds(false);
+      setOdds({
+        redWinProbability: 0.5,
+        blueWinProbability: 0.5,
+        redOdds: 2, blueOdds: 2,
+        expectedMargin: 0, expectedTotal: 0,
+        matchConfidence: 0,
+        redAverage: 0, blueAverage: 0,
+        marginStd: 0, totalStd: 0,
+      });
     } finally {
       setIsLoadingOdds(false);
     }
@@ -955,6 +967,9 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>Match {match.match_number}</Text>
             <Text style={styles.headerSubtitle}>Place Your Bets</Text>
+            {!hasFullOdds && (
+              <Text style={styles.headerHint}>Limited to Win/Lose (50/50 odds) — need more team data for other bet types</Text>
+            )}
           </View>
           <View style={styles.balanceBadge}>
             <Text style={styles.balanceText}>{balance} ebucks</Text>
@@ -968,7 +983,7 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
           </View>
         ) : (
           <>
-            {/* Tabs */}
+            {/* Tabs - margin/over_under/parlay disabled when insufficient data */}
             <View style={styles.tabs}>
               <TouchableOpacity
                 style={[styles.tab, activeTab === 'winner' && styles.tabActive]}
@@ -979,26 +994,68 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.tab, activeTab === 'margin' && styles.tabActive]}
-                onPress={() => setActiveTab('margin')}
+                style={[
+                  styles.tab,
+                  activeTab === 'margin' && styles.tabActive,
+                  !hasFullOdds && styles.tabDisabled,
+                ]}
+                onPress={() => {
+                  if (!hasFullOdds) {
+                    Alert.alert('Insufficient Data', INSUFFICIENT_DATA_MSG);
+                    return;
+                  }
+                  setActiveTab('margin');
+                }}
               >
-                <Text style={[styles.tabText, activeTab === 'margin' && styles.tabTextActive]}>
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'margin' && styles.tabTextActive,
+                  !hasFullOdds && styles.tabTextDisabled,
+                ]}>
                   Margin
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.tab, activeTab === 'over_under' && styles.tabActive]}
-                onPress={() => setActiveTab('over_under')}
+                style={[
+                  styles.tab,
+                  activeTab === 'over_under' && styles.tabActive,
+                  !hasFullOdds && styles.tabDisabled,
+                ]}
+                onPress={() => {
+                  if (!hasFullOdds) {
+                    Alert.alert('Insufficient Data', INSUFFICIENT_DATA_MSG);
+                    return;
+                  }
+                  setActiveTab('over_under');
+                }}
               >
-                <Text style={[styles.tabText, activeTab === 'over_under' && styles.tabTextActive]}>
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'over_under' && styles.tabTextActive,
+                  !hasFullOdds && styles.tabTextDisabled,
+                ]}>
                   Over/Under
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.tab, activeTab === 'parlay' && styles.tabActive]}
-                onPress={() => setActiveTab('parlay')}
+                style={[
+                  styles.tab,
+                  activeTab === 'parlay' && styles.tabActive,
+                  !hasFullOdds && styles.tabDisabled,
+                ]}
+                onPress={() => {
+                  if (!hasFullOdds) {
+                    Alert.alert('Insufficient Data', INSUFFICIENT_DATA_MSG);
+                    return;
+                  }
+                  setActiveTab('parlay');
+                }}
               >
-                <Text style={[styles.tabText, activeTab === 'parlay' && styles.tabTextActive]}>
+                <Text style={[
+                  styles.tabText,
+                  activeTab === 'parlay' && styles.tabTextActive,
+                  !hasFullOdds && styles.tabTextDisabled,
+                ]}>
                   Parlay
                 </Text>
               </TouchableOpacity>
@@ -1094,6 +1151,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.9)',
     marginTop: 2,
   },
+  headerHint: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginTop: 4,
+    textAlign: 'center',
+  },
   balanceBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 12,
@@ -1131,10 +1194,16 @@ const styles = StyleSheet.create({
   tabActive: {
     borderBottomColor: '#ff6600',
   },
+  tabDisabled: {
+    opacity: 0.6,
+  },
   tabText: {
     color: '#b0b0b0',
     fontSize: 14,
     fontWeight: '500',
+  },
+  tabTextDisabled: {
+    color: '#666',
   },
   tabTextActive: {
     color: '#ff6600',

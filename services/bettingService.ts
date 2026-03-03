@@ -96,10 +96,24 @@ export interface MatchOdds {
 
 const ODDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes max
 
+/** 50/50 odds when insufficient data for calculated odds */
+const FALLBACK_50_50_ODDS: MatchOdds = {
+  redWinProbability: 0.5,
+  blueWinProbability: 0.5,
+  redOdds: 2, blueOdds: 2,
+  expectedMargin: 0, expectedTotal: 0,
+  matchConfidence: 0,
+  redAverage: 0, blueAverage: 0,
+  marginStd: 0, totalStd: 0,
+};
+
+export type BettingDataResult = { hasFullOdds: boolean; odds: MatchOdds };
+
 class BettingService {
   private oddsCache = new Map<string, { odds: MatchOdds; fetchedAt: number }>();
   private eligibilityCache = new Map<string, { canBet: boolean; reason?: string; fetchedAt: number }>();
   private oddsInFlight = new Map<string, Promise<MatchOdds>>();
+  private bettingDataInFlight = new Map<string, Promise<BettingDataResult>>();
 
   private getOddsCacheKey(redTeams: number[], blueTeams: number[], eventKey: string, matchKey?: string): string {
     return matchKey ?? `${eventKey}:${redTeams.join(',')}:${blueTeams.join(',')}`;
@@ -189,6 +203,103 @@ class BettingService {
       return cached.odds;
     }
     return null;
+  }
+
+  /**
+   * Get betting data with full odds or 50/50 fallback. Single refresh + parallel fetches for speed.
+   * Returns { hasFullOdds: true, odds } when 2+ teams per alliance have data; else { hasFullOdds: false, odds: 50/50 }.
+   */
+  async getBettingDataOrFallback(
+    redTeams: number[],
+    blueTeams: number[],
+    eventKey: string,
+    matchKey?: string
+  ): Promise<BettingDataResult> {
+    const cacheKey = this.getOddsCacheKey(redTeams, blueTeams, eventKey, matchKey);
+    const now = Date.now();
+
+    const cachedOdds = this.oddsCache.get(cacheKey);
+    if (cachedOdds && now - cachedOdds.fetchedAt < ODDS_CACHE_TTL_MS) {
+      return { hasFullOdds: true, odds: cachedOdds.odds };
+    }
+
+    const inFlight = this.bettingDataInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const promise = this.computeBettingDataOrFallback(redTeams, blueTeams, eventKey, cacheKey, now);
+    this.bettingDataInFlight.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.bettingDataInFlight.delete(cacheKey);
+    }
+  }
+
+  private async computeBettingDataOrFallback(
+    redTeams: number[],
+    blueTeams: number[],
+    eventKey: string,
+    cacheKey: string,
+    now: number
+  ): Promise<BettingDataResult> {
+    const cachedEligibility = this.eligibilityCache.get(cacheKey);
+    if (cachedEligibility && now - cachedEligibility.fetchedAt < ODDS_CACHE_TTL_MS && !cachedEligibility.canBet) {
+      return { hasFullOdds: false, odds: FALLBACK_50_50_ODDS };
+    }
+
+    await teamStatisticsService.refreshTeamStatistics();
+    const allTeams = [...redTeams, ...blueTeams];
+    const [allStats, leagueAverage] = await Promise.all([
+      teamStatisticsService.getTeamStatisticsBatch(allTeams, eventKey),
+      this.getLeagueAverage(eventKey),
+    ]);
+
+    const redAlliance = this.buildAllianceDataFromStats(redTeams, allStats);
+    const blueAlliance = this.buildAllianceDataFromStats(blueTeams, allStats);
+
+    const redOk = redAlliance.teamsWithValidData >= 2;
+    const blueOk = blueAlliance.teamsWithValidData >= 2;
+    const redVar = (redAlliance.stdDev ?? 0) ** 2;
+    const blueVar = (blueAlliance.stdDev ?? 0) ** 2;
+    const marginStd = Math.sqrt(redVar + blueVar);
+    const hasFullOdds = redOk && blueOk && marginStd > 0;
+
+    if (!hasFullOdds) {
+      this.eligibilityCache.set(cacheKey, { canBet: false, reason: 'Insufficient data', fetchedAt: now });
+      return { hasFullOdds: false, odds: FALLBACK_50_50_ODDS };
+    }
+
+    const matchConf = this.calculateMatchConfidence(redAlliance.confidence, blueAlliance.confidence);
+    const winnerOdds = this.calculateWinnerOdds(
+      redAlliance.average,
+      blueAlliance.average,
+      redAlliance.confidence,
+      blueAlliance.confidence,
+      matchConf
+    );
+    const redAvg = redAlliance.average;
+    const blueAvg = blueAlliance.average;
+    const expectedMargin = Math.abs(redAvg - blueAvg);
+    const expectedTotal = redAvg + blueAvg;
+    const totalStd = marginStd;
+
+    const odds: MatchOdds = {
+      redWinProbability: winnerOdds.redWinProb,
+      blueWinProbability: winnerOdds.blueWinProb,
+      redOdds: winnerOdds.redOdds,
+      blueOdds: winnerOdds.blueOdds,
+      expectedMargin,
+      expectedTotal,
+      matchConfidence: matchConf,
+      leagueAverage: leagueAverage || undefined,
+      redAverage: redAvg,
+      blueAverage: blueAvg,
+      marginStd,
+      totalStd,
+    };
+    this.oddsCache.set(cacheKey, { odds, fetchedAt: now });
+    this.eligibilityCache.set(cacheKey, { canBet: true, fetchedAt: now });
+    return { hasFullOdds: true, odds };
   }
 
   /**

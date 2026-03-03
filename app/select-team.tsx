@@ -5,7 +5,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   StyleSheet,
   Text,
@@ -26,7 +25,6 @@ export default function SelectTeamScreen() {
   const { matchKey, matchNumber, compLevel, eventKey } = params;
 
   const [bettingModalVisible, setBettingModalVisible] = useState(false);
-  const [bettingAllowed, setBettingAllowed] = useState<boolean | null>(null);
   const borderOpacity = useRef(new Animated.Value(0.3)).current;
 
   // Fetch matches to get the specific match
@@ -58,32 +56,6 @@ export default function SelectTeamScreen() {
 
   const redTeams = match ? match.alliances.red.team_keys.map((key) => parseInt(key.replace('frc', ''), 10)) : [];
   const blueTeams = match ? match.alliances.blue.team_keys.map((key) => parseInt(key.replace('frc', ''), 10)) : [];
-
-  useEffect(() => {
-    if (!eventKey || redTeams.length === 0 || blueTeams.length === 0) {
-      setBettingAllowed(false);
-      return;
-    }
-    // Use cached eligibility if available (same match, within TTL) - avoids loading spinner on return
-    const cached = bettingService.getCachedEligibility(redTeams, blueTeams, eventKey, match?.key);
-    if (cached) {
-      setBettingAllowed(cached.canBet);
-      return; // Cache hit, no need to re-fetch
-    }
-    let cancelled = false;
-    setBettingAllowed(null);
-    bettingService
-      .checkBettingEligibility(redTeams, blueTeams, eventKey, match?.key)
-      .then(({ canBet }) => {
-        if (!cancelled) setBettingAllowed(canBet);
-      })
-      .catch(() => {
-        if (!cancelled) setBettingAllowed(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [eventKey, match?.key, redTeams.join(','), blueTeams.join(',')]);
 
   const handleSelectTeam = async (teamNumber: number) => {
     const teamNumStr = teamNumber.toString();
@@ -131,28 +103,15 @@ export default function SelectTeamScreen() {
       </View>
 
       <View style={styles.content}>
-        {/* Place Bet Button */}
+        {/* Place Bet Button - Always available; modal checks eligibility on open */}
         <TouchableOpacity
           style={styles.betButton}
-          onPress={() => {
-            if (bettingAllowed !== true) {
-              Alert.alert(
-                'Insufficient Data',
-                'There is insufficient data for accurate odds for betting. Need at least 2 teams with data (manually scouted or Statbotics) per alliance.',
-                [{ text: 'OK' }]
-              );
-              return;
-            }
-            bettingService.preloadOdds(redTeams, blueTeams, eventKey, match.key);
-            setBettingModalVisible(true);
-          }}
+          onPress={() => setBettingModalVisible(true)}
           activeOpacity={0.8}
-          disabled={bettingAllowed === null}
         >
           <Animated.View
             style={[
               styles.betButtonInner,
-              bettingAllowed === false && styles.betButtonDisabled,
               {
                 shadowOpacity: borderOpacity.interpolate({
                   inputRange: [0.5, 1],
@@ -161,11 +120,7 @@ export default function SelectTeamScreen() {
               },
             ]}
           >
-            {bettingAllowed === null ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.betButtonText}>Place Bet</Text>
-            )}
+            <Text style={styles.betButtonText}>Place Bet</Text>
           </Animated.View>
         </TouchableOpacity>
 
@@ -208,7 +163,7 @@ export default function SelectTeamScreen() {
         </View>
       </View>
 
-      {/* Betting Modal */}
+      {/* Betting Modal - Checks eligibility on open; shows 50/50 winner-only if insufficient data */}
       {match && (
         <BettingModal
           visible={bettingModalVisible}
@@ -279,10 +234,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
-  },
-  betButtonDisabled: {
-    opacity: 0.5,
-    borderColor: '#666',
   },
   allianceSection: {
     marginBottom: 24,
