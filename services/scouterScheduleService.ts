@@ -169,17 +169,19 @@ class ScouterScheduleService {
 
   /**
    * Generate automated scouting schedule.
-   * Requires at least 6 registered scouters.
+   * Requires at least 6 scouters.
    * Uses least-assigned-first rotation for fairness, with rotating slot positions.
    * Uses bulk upsert for fast execution (1–2 network calls instead of hundreds).
+   * @param scoutersToInclude - Optional list of scouter names to include. If omitted, fetches all team scouters.
    */
   async generateSchedule(
     teamId: string,
-    eventKey: string
+    eventKey: string,
+    scoutersToInclude?: string[]
   ): Promise<{ success: true } | { success: false; error: string }> {
     console.warn('[GenerateSchedule] Started', { teamId, eventKey });
 
-    const scouters = await this.getTeamScouters(teamId);
+    const scouters = scoutersToInclude ?? (await this.getTeamScouters(teamId));
     console.warn('[GenerateSchedule] Fetched scouters:', scouters.length, scouters);
 
     if (scouters.length < 6) {

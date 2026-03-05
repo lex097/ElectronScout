@@ -18,6 +18,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Modal,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
@@ -198,6 +200,25 @@ export default function ScouterSchedulesScreen() {
   } = useScouterAssignments(teamId, eventKey);
   const { data: scouters = [] } = useTeamScouters(teamId);
 
+  const [showScouterModal, setShowScouterModal] = useState(false);
+  const [selectedScouters, setSelectedScouters] = useState<Set<string>>(new Set());
+
+  // When opening modal, initialize all scouters as selected
+  useEffect(() => {
+    if (showScouterModal && scouters.length > 0) {
+      setSelectedScouters(new Set(scouters));
+    }
+  }, [showScouterModal, scouters]);
+
+  const toggleScouter = useCallback((name: string) => {
+    setSelectedScouters((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+
   const showSkeletonCards =
     assignmentsFetching && !assignmentsLoading && !!matches?.length && assignments.length === 0;
 
@@ -223,9 +244,7 @@ export default function ScouterSchedulesScreen() {
     router.push('/select-event' as any);
   };
 
-  const handleGenerateSchedule = useCallback(async () => {
-    if (!teamId || !eventKey?.trim()) return;
-    if (scheduleGenerating) return;
+  const handleOpenGenerateModal = useCallback(() => {
     if (scouters.length < 6) {
       Alert.alert(
         'Not Enough Scouters',
@@ -233,9 +252,28 @@ export default function ScouterSchedulesScreen() {
       );
       return;
     }
+    setShowScouterModal(true);
+  }, [scouters.length]);
+
+  const handleGenerateFromModal = useCallback(async () => {
+    if (!teamId || !eventKey?.trim()) return;
+    if (scheduleGenerating) return;
+    const selected = Array.from(selectedScouters);
+    if (selected.length < 6) {
+      Alert.alert(
+        'At Least 6 Required',
+        'Please select at least 6 scouters to include in the schedule.'
+      );
+      return;
+    }
     setScheduleGenerating(true);
+    setShowScouterModal(false);
     try {
-      const result = await scouterScheduleService.generateSchedule(teamId, eventKey);
+      const result = await scouterScheduleService.generateSchedule(
+        teamId,
+        eventKey,
+        selected
+      );
       if (result.success) {
         queryClient.invalidateQueries({
           queryKey: queryKeys.scouterAssignments.byTeamAndEvent(teamId, eventKey),
@@ -250,7 +288,13 @@ export default function ScouterSchedulesScreen() {
     } finally {
       setScheduleGenerating(false);
     }
-  }, [teamId, eventKey, scouters.length, scheduleGenerating, setScheduleGenerating]);
+  }, [
+    teamId,
+    eventKey,
+    selectedScouters,
+    scheduleGenerating,
+    setScheduleGenerating,
+  ]);
 
   const handleMatchPress = (match: TBAMatch) => {
     if (!teamId || !eventKey) return;
@@ -323,7 +367,7 @@ export default function ScouterSchedulesScreen() {
             styles.generateButton,
             (!canGenerate || scheduleGenerating) && styles.generateButtonDisabled,
           ]}
-          onPress={handleGenerateSchedule}
+          onPress={handleOpenGenerateModal}
           disabled={!canGenerate || scheduleGenerating}
         >
           {scheduleGenerating ? (
@@ -368,6 +412,77 @@ export default function ScouterSchedulesScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      <Modal
+        visible={showScouterModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowScouterModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowScouterModal(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={styles.modalContent}
+          >
+            <Text style={styles.modalTitle}>Scouters to include</Text>
+            <Text style={styles.modalSubtitle}>
+              Select at least 6 scouters for the schedule
+            </Text>
+            <ScrollView
+              style={styles.modalScroll}
+              showsVerticalScrollIndicator
+            >
+              {scouters.map((name) => (
+                <TouchableOpacity
+                  key={name}
+                  style={styles.scouterRow}
+                  onPress={() => toggleScouter(name)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      selectedScouters.has(name) && styles.checkboxChecked,
+                    ]}
+                  >
+                    {selectedScouters.has(name) && (
+                      <Text style={styles.checkboxCheck}>✓</Text>
+                    )}
+                  </View>
+                  <Text style={styles.scouterName}>{name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowScouterModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalGenerateButton,
+                  scheduleGenerating && styles.modalGenerateDisabled,
+                ]}
+                onPress={handleGenerateFromModal}
+                disabled={scheduleGenerating}
+              >
+                {scheduleGenerating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalGenerateText}>Generate</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -561,5 +676,95 @@ const styles = StyleSheet.create({
     width: 40,
     height: 8,
     alignSelf: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 360,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#b0b0b0',
+    marginBottom: 16,
+  },
+  modalScroll: {
+    maxHeight: 280,
+    marginBottom: 16,
+  },
+  scouterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#404040',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#666',
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#ff6600',
+    borderColor: '#ff6600',
+  },
+  checkboxCheck: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  scouterName: {
+    fontSize: 16,
+    color: '#fff',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  modalCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  modalCancelText: {
+    color: '#b0b0b0',
+    fontSize: 16,
+  },
+  modalGenerateButton: {
+    backgroundColor: '#ff6600',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalGenerateDisabled: {
+    opacity: 0.5,
+  },
+  modalGenerateText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

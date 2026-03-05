@@ -1102,12 +1102,15 @@ export default function MatchScoutScreen() {
         {/* End Match Button */}
         <View ref={saveButtonContainerRef} onLayout={handleSaveButtonLayout}>
         <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            (isSaving || !matchStarted) && styles.saveButtonDisabled,
+          ]}
           onPress={handleEndMatch}
-          disabled={isSaving}
+          disabled={isSaving || !matchStarted}
         >
           <Text style={styles.saveButtonText}>
-            {isSaving ? 'Submitting...' : 'End Match'}
+            {isSaving ? 'Submitting...' : !matchStarted ? 'Start match first' : 'End Match'}
           </Text>
         </TouchableOpacity>
         </View>
