@@ -6,8 +6,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
 import { db } from './database';
-import { LeagueAverage, TeamStatistics, teamStatisticsService } from './teamStatisticsService';
 import { supabaseSyncService } from './supabase.sync';
+import { LeagueAverage, TeamStatistics, teamStatisticsService } from './teamStatisticsService';
 
 /** Normal CDF approximation (Abramowitz & Stegun). Returns P(X <= x) for N(mean, std). */
 function normalCDF(x: number, mean: number, std: number): number {
