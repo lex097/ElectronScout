@@ -37,6 +37,8 @@ async function fetchTeamAnalytics(eventKey: string): Promise<AnalyticsData> {
     timestamp: match.timestamp,
     synced: match.synced,
     notes: match.notes,
+    survey: match.survey,
+    allianceColor: match.allianceColor ?? match.alliance,
   }));
   const teamAnalytics =
     matchesAsMatchData.length > 0

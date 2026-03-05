@@ -9,10 +9,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RapidCounterInput } from '../../components/RapidCounterInput';
+import { SurveyModal } from '../../components/SurveyModal';
 import { ACTIVE_GAME_CONFIG, getDefaultsForPhases, getInitialMatchData, Metric } from '../../config/gameConfig';
 import { getEffectiveYear, useDemoStore } from '../../stores/demoStore';
 import { bettingService } from '../../services/bettingService';
 import { db } from '../../services/database';
+import { syncManager } from '../../services/syncTransformer';
 import { useAuthStore } from '../../stores/authStore';
 import { useBetNotificationStore } from '../../stores/betNotificationStore';
 import { EARNED_PER_MATCH, useEbucksStore } from '../../stores/ebucksStore';
@@ -24,6 +26,7 @@ const SELECTED_EVENT_NAME_KEY = 'selected_event_name';
 const SELECTED_MATCH_KEY = 'selected_match_key';
 const SELECTED_MATCH_NUMBER_KEY = 'selected_match_number';
 const SELECTED_TEAM_NUMBER_KEY = 'selected_team_number';
+const SELECTED_ALLIANCE_KEY = 'selected_alliance_color';
 const EVENT_KEYS = ['selected_event_key', 'selected_event_name'];
 
 export default function MatchScoutScreen() {
@@ -31,16 +34,18 @@ export default function MatchScoutScreen() {
     matchNumber?: string;
     teamNumber?: string;
     fromTBA?: string;
+    allianceColor?: 'red' | 'blue';
   }>();
 
   const [isTBAMode, setIsTBAMode] = useState(true);
   const [matchNumber, setMatchNumber] = useState('');
   const [teamNumber, setTeamNumber] = useState('');
+  const [allianceColor, setAllianceColor] = useState<'red' | 'blue' | null>(null);
   const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
   const [selectedMatchNumber, setSelectedMatchNumber] = useState<string | null>(null);
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
   const [metrics, setMetrics] = useState(getInitialMatchData());
-  const [notes, setNotes] = useState('');
+  const [showSurveyModal, setShowSurveyModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRapidCounterExpanded, setIsRapidCounterExpanded] = useState(false);
   const [matchStarted, setMatchStarted] = useState(false);
@@ -59,13 +64,11 @@ export default function MatchScoutScreen() {
   const autonomousTimeRemainingRef = useRef<number | null>(null);
   const autonomousTimerCompletedRef = useRef<boolean>(false);
   const hasAutoSwitchedRef = useRef<boolean>(false);
+  const skipAllianceClearRef = useRef<boolean>(false); // Skip clearing alliance when change came from TBA params
   const scrollYRef = useRef<number>(0); // Track current scroll position
-  const notesInputRef = useRef<TextInput>(null);
-  const notesSectionRef = useRef<View>(null);
-  const notesSectionYRef = useRef<number>(0);
   const saveButtonContainerRef = useRef<View>(null);
   const saveButtonYRef = useRef<number>(0);
-  const isShiftPressedRef = useRef<boolean>(false);
+  const pendingMatchIdRef = useRef<string | null>(null);
   const insets = useSafeAreaInsets();
   const getScoutName = useAuthStore((state) => state.getScoutName);
   const earnEbucks = useEbucksStore((state) => state.earnEbucks);
@@ -137,6 +140,9 @@ export default function MatchScoutScreen() {
         } else {
           loadedSelectionRef.current = null;
         }
+
+        const alliance = await AsyncStorage.getItem(SELECTED_ALLIANCE_KEY);
+        setAllianceColor(alliance === 'red' || alliance === 'blue' ? alliance : null);
       } catch (error) {
         console.error('Error loading preferences:', error);
       }
@@ -186,6 +192,27 @@ export default function MatchScoutScreen() {
           } else {
             loadedSelectionRef.current = null;
           }
+
+          let alliance = await AsyncStorage.getItem(SELECTED_ALLIANCE_KEY);
+          if ((!alliance || (alliance !== 'red' && alliance !== 'blue')) && eventKey && matchNum && teamNum) {
+            // Derive from cached matches (no extra API call)
+            const matches = queryClient.getQueryData<import('@/api/types').TBAMatch[]>(
+              queryKeys.matches.byEvent(eventKey)
+            );
+            const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
+            if (matches && matchKey) {
+              const match = matches.find((m) => m.key === matchKey);
+              const teamKey = `frc${teamNum}`;
+              if (match?.alliances?.red?.team_keys?.includes(teamKey)) {
+                alliance = 'red';
+                await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'red');
+              } else if (match?.alliances?.blue?.team_keys?.includes(teamKey)) {
+                alliance = 'blue';
+                await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'blue');
+              }
+            }
+          }
+          setAllianceColor(alliance === 'red' || alliance === 'blue' ? alliance : null);
         } catch (error) {
           console.error('Error reloading preferences:', error);
         }
@@ -200,10 +227,17 @@ export default function MatchScoutScreen() {
     if (params.fromTBA === 'true' && params.matchNumber && params.teamNumber) {
       const newMatchNumber = params.matchNumber;
       const newTeamNumber = params.teamNumber;
+      const newAlliance = params.allianceColor;
       loadedSelectionRef.current = { matchNumber: newMatchNumber, teamNumber: newTeamNumber };
       matchNumberRef.current = newMatchNumber;
       teamNumberRef.current = newTeamNumber;
-      
+
+      if (newAlliance === 'red' || newAlliance === 'blue') {
+        setAllianceColor(newAlliance);
+        AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, newAlliance);
+      }
+      skipAllianceClearRef.current = true; // Don't clear alliance in reset effect
+
       // Only update if values actually changed
       if (newMatchNumber !== matchNumber) {
         setMatchNumber(newMatchNumber);
@@ -223,9 +257,8 @@ export default function MatchScoutScreen() {
       setAutonomousTimerCompleted(false);
       setCurrentPhaseIndex(0); // Reset to autonomous
       setMetrics(getInitialMatchData()); // Reset metrics
-      setNotes(''); // Reset notes
     }
-  }, [params.fromTBA, params.matchNumber, params.teamNumber]);
+  }, [params.fromTBA, params.matchNumber, params.teamNumber, params.allianceColor]);
 
   // Reset match state when match or team number changes manually
   useEffect(() => {
@@ -240,6 +273,11 @@ export default function MatchScoutScreen() {
         setAutonomousTimeRemaining(null);
         setShowCountdownToast(false);
         setAutonomousTimerCompleted(false);
+        if (!skipAllianceClearRef.current) {
+          setAllianceColor(null);
+          AsyncStorage.removeItem(SELECTED_ALLIANCE_KEY);
+        }
+        skipAllianceClearRef.current = false;
         if (timerIntervalRef.current) {
           clearInterval(timerIntervalRef.current);
           timerIntervalRef.current = null;
@@ -350,6 +388,10 @@ export default function MatchScoutScreen() {
   const handleTBAModeToggle = async (value: boolean) => {
     setIsTBAMode(value);
     await AsyncStorage.setItem(TBA_MODE_KEY, value.toString());
+    if (value === false) {
+      setAllianceColor(null);
+      await AsyncStorage.removeItem(SELECTED_ALLIANCE_KEY);
+    }
   };
 
   // Update refs synchronously when user types so startMatch always sees latest values
@@ -404,6 +446,10 @@ export default function MatchScoutScreen() {
       Alert.alert('Select a match', 'Please select a match and team before starting.');
       return;
     }
+    if (!allianceColor) {
+      Alert.alert('Select alliance', 'Please select Red or Blue alliance before starting.');
+      return;
+    }
     // Only start if timer hasn't been completed yet
     if (!matchStartedRef.current && !autonomousTimerCompletedRef.current && isAutonomousPhase) {
       console.log('[Timer] Starting match - Autonomous duration:', autonomousDuration);
@@ -420,11 +466,11 @@ export default function MatchScoutScreen() {
         timerIntervalRef.current = null;
       }
     }
-  }, [isAutonomousPhase, autonomousDuration]);
+  }, [isAutonomousPhase, autonomousDuration, allianceColor]);
 
   const updateMetric = (metricId: string, value: any) => {
-    // Start match if user starts scoring in autonomous phase (only if timer hasn't completed)
-    if (!matchStarted && !autonomousTimerCompleted && isAutonomousPhase && currentPhase.id === 'auto') {
+    // Start match if user starts scoring in autonomous phase (only if timer hasn't completed and alliance selected)
+    if (!matchStarted && !autonomousTimerCompleted && isAutonomousPhase && currentPhase.id === 'auto' && allianceColor) {
       startMatch();
     }
     
@@ -574,175 +620,150 @@ export default function MatchScoutScreen() {
     doScroll();
   }, [insets.bottom]);
 
-  const handleNotesFocus = useCallback(() => {
-    // Wait a bit for the keyboard to start appearing, then scroll so save button is right above keyboard
-    setTimeout(() => {
-      if (scrollViewRef.current) {
-        const screenHeight = Dimensions.get('window').height;
-        const tabBarHeight = 49 + insets.bottom;
-        // Estimate keyboard height (will be adjusted by KeyboardAvoidingView)
-        const keyboardHeight = Platform.OS === 'ios' ? 336 : 300;
-        const visibleAreaBottom = screenHeight - tabBarHeight - keyboardHeight;
-        
-        // Get the stored Y positions
-        const saveButtonY = saveButtonYRef.current;
-        const saveButtonHeight = 60; // Approximate height of save button (padding 20 + text)
-        
-        // We want to scroll so that:
-        // - Save button is positioned right above the keyboard (at the bottom of visible area)
-        // - Notes input is visible above the save button
-        // - Keyboard appears right below the save button
-        
-        // Position save button bottom at the visible area bottom (right above keyboard)
-        const saveButtonBottom = saveButtonY + saveButtonHeight;
-        const scrollToY = saveButtonBottom - visibleAreaBottom;
-        
-        scrollViewRef.current.scrollTo({
-          y: Math.max(0, scrollToY),
-          animated: true,
-        });
-      }
-    }, 150);
-  }, [insets.bottom]);
-
-  const handleNotesSectionLayout = useCallback((event: any) => {
-    const { y } = event.nativeEvent.layout;
-    notesSectionYRef.current = y;
-  }, []);
-
   const handleSaveButtonLayout = useCallback((event: any) => {
     const { y } = event.nativeEvent.layout;
     saveButtonYRef.current = y;
   }, []);
 
   const handleScrollBeginDrag = useCallback(() => {
-    // Dismiss keyboard when user starts scrolling
     Keyboard.dismiss();
   }, []);
 
-  const handleNotesKeyPress = useCallback((event: any) => {
-    const key = event.nativeEvent?.key;
-    
-    // Check if Return/Enter is pressed
-    if (key === 'Enter' || key === 'Return') {
-      // Try to detect if Shift is pressed
-      // Check various possible locations for shift key state
-      const nativeEvent = event.nativeEvent || {};
-      const isShiftPressed = 
-        nativeEvent.shiftKey === true || 
-        nativeEvent.modifiers?.shift === true ||
-        nativeEvent.modifiers?.includes?.('shift') ||
-        isShiftPressedRef.current;
-      
-      // Only dismiss if Shift is NOT pressed
-      if (!isShiftPressed) {
-        Keyboard.dismiss();
-        notesInputRef.current?.blur();
-      }
-      // If Shift is pressed, allow default behavior (new line) - don't dismiss
-    } else if (key === 'Shift' || key === 'ShiftLeft' || key === 'ShiftRight') {
-      // Track shift key state when it's pressed
-      isShiftPressedRef.current = true;
-      // Reset after a short delay (in case keyup event doesn't fire)
-      setTimeout(() => {
-        isShiftPressedRef.current = false;
-      }, 1000);
-    }
-  }, []);
-
-  const handleSave = async () => {
-    // Dismiss keyboard when saving
+  const handleEndMatch = useCallback(async () => {
     Keyboard.dismiss();
-    
     if (!matchNumber?.trim() || !teamNumber?.trim()) {
       Alert.alert('Error', 'Please enter match and team number');
       return;
     }
-
-    setIsSaving(true);
-
+    const scoutName = await getScoutName();
+    const matchId = `${Date.now()}-${matchNumber}-${teamNumber}`;
+    pendingMatchIdRef.current = matchId;
+    const matchDataWithoutSurvey: MatchData = {
+      id: matchId,
+      matchNumber: parseInt(matchNumber),
+      teamNumber: parseInt(teamNumber),
+      scouterId: scoutName || 'unknown',
+      gameYear: getEffectiveYear(),
+      metrics,
+      timestamp: Date.now(),
+      synced: false,
+      survey: {},
+      allianceColor: allianceColor || undefined,
+    };
     try {
-      const scoutName = await getScoutName();
-      const matchData: MatchData = {
-        id: `${Date.now()}-${matchNumber}-${teamNumber}`,
-        matchNumber: parseInt(matchNumber),
-        teamNumber: parseInt(teamNumber),
-        scouterId: scoutName || 'unknown',
-        gameYear: getEffectiveYear(),
-        metrics,
-        timestamp: Date.now(),
-        synced: false,
-        notes
-      };
-
-      await db.saveMatch(matchData);
-      
-      // Award ebucks for scouting match
-      await earnEbucks(EARNED_PER_MATCH, `Scouted match ${matchNumber} for team ${teamNumber}`);
-      
-      // Check and resolve bets if in TBA mode and match key is available
-      if (isTBAMode) {
-        try {
-          const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
-          if (matchKey) {
-            console.log(`[Betting] Checking bets for match after scouting: ${matchKey}`);
-            const resolutions = await bettingService.checkAndResolveBets(matchKey);
-            await refreshBalance();
-            const first = resolutions?.[0];
-            if (first) {
-              showBetNotification({ matchNumber: first.matchNumber, won: first.won, payout: first.payout });
-            }
-          }
-        } catch (error) {
-          console.error('Error checking/resolving bets after match save:', error);
-          // Don't show error to user, just log it
-        }
-      }
-      
-      Alert.alert(
-        'Success',
-        `Match ${matchNumber} for team ${teamNumber} saved! You earned ${EARNED_PER_MATCH} ebucks!`,
-        [
-          {
-            text: 'New Match',
-            onPress: async () => {
-              // If timer was running (e.g. still in autonomous), reset match and timer state
-              resetMatchAndTimerState();
-              if (isTBAMode) {
-                // Clear match/team selection so if user swipes back without selecting, fields stay clear
-                await AsyncStorage.multiRemove([SELECTED_MATCH_KEY, SELECTED_MATCH_NUMBER_KEY, SELECTED_TEAM_NUMBER_KEY]);
-                const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
-                if (eventKey) {
-                  router.push({
-                    pathname: '/select-match' as any,
-                    params: { eventKey },
-                  });
-                } else {
-                  // If no event key, go to event selection
-                  router.push('/select-event' as any);
-                }
-              } else {
-                // In manual mode, increment match number
-                setMatchNumber(String((parseInt(matchNumber, 10) || 0) + 1));
-                setTeamNumber('');
-              }
-              setMetrics(getInitialMatchData());
-              setNotes('');
-              setCurrentPhaseIndex(0);
-            }
-          }
-        ]
+      await db.saveMatch(matchDataWithoutSurvey);
+      syncManager.uploadMatch(matchDataWithoutSurvey).catch((e) =>
+        console.error('[Survey] Background upload failed:', e)
       );
-    } catch (error: any) {
-      const errMsg = error?.message ?? String(error);
-      const errStack = error?.stack;
-      console.error('[Save Match] Failed:', errMsg, errStack || '');
-      const shortMsg = errMsg.length > 80 ? `${errMsg.slice(0, 77)}...` : errMsg;
-      Alert.alert('Error', `Failed to save match data: ${shortMsg}`);
-    } finally {
-      setIsSaving(false);
+    } catch (e) {
+      console.error('[End Match] Failed to save:', e);
+      Alert.alert('Error', 'Failed to save match data.');
+      return;
     }
-  };
+    setShowSurveyModal(true);
+  }, [matchNumber, teamNumber, metrics, allianceColor, getEffectiveYear]);
+
+  const handleSurveySubmit = useCallback(
+    async (survey: Record<string, any>) => {
+      const matchId = pendingMatchIdRef.current;
+      if (!matchId || !matchNumber?.trim() || !teamNumber?.trim()) return;
+      setIsSaving(true);
+      setShowSurveyModal(false);
+      pendingMatchIdRef.current = null;
+      const notesFromSurvey =
+        (typeof survey.notes === 'string' ? survey.notes : '') || '';
+      try {
+        const scoutName = await getScoutName();
+        const matchData: MatchData = {
+          id: matchId,
+          matchNumber: parseInt(matchNumber),
+          teamNumber: parseInt(teamNumber),
+          scouterId: scoutName || 'unknown',
+          gameYear: getEffectiveYear(),
+          metrics,
+          timestamp: Date.now(),
+          synced: false,
+          notes: notesFromSurvey,
+          survey,
+          allianceColor: allianceColor || undefined,
+        };
+        await db.saveMatch(matchData);
+        await syncManager.uploadMatch(matchData);
+        await earnEbucks(EARNED_PER_MATCH, `Scouted match ${matchNumber} for team ${teamNumber}`);
+        if (isTBAMode) {
+          try {
+            const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
+            if (matchKey) {
+              const resolutions = await bettingService.checkAndResolveBets(matchKey);
+              await refreshBalance();
+              const first = resolutions?.[0];
+              if (first) {
+                showBetNotification({
+                  matchNumber: first.matchNumber,
+                  won: first.won,
+                  payout: first.payout,
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error checking/resolving bets after match save:', error);
+          }
+        }
+        Alert.alert(
+          'Success',
+          `Match ${matchNumber} for team ${teamNumber} saved! You earned ${EARNED_PER_MATCH} ebucks!`,
+          [
+            {
+              text: 'New Match',
+              onPress: async () => {
+                resetMatchAndTimerState();
+                if (isTBAMode) {
+                  await AsyncStorage.multiRemove([
+                    SELECTED_MATCH_KEY,
+                    SELECTED_MATCH_NUMBER_KEY,
+                    SELECTED_TEAM_NUMBER_KEY,
+                    SELECTED_ALLIANCE_KEY,
+                  ]);
+                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+                  if (eventKey) {
+                    router.push({
+                      pathname: '/select-match' as any,
+                      params: { eventKey },
+                    });
+                  } else {
+                    router.push('/select-event' as any);
+                  }
+                } else {
+                  setMatchNumber(String((parseInt(matchNumber, 10) || 0) + 1));
+                  setTeamNumber('');
+                }
+                setMetrics(getInitialMatchData());
+                setCurrentPhaseIndex(0);
+              },
+            },
+          ]
+        );
+      } catch (error: any) {
+        const errMsg = error?.message ?? String(error);
+        console.error('[Submit Match] Failed:', errMsg);
+        Alert.alert('Error', `Failed to save match: ${errMsg.slice(0, 80)}`);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      matchNumber,
+      teamNumber,
+      metrics,
+      allianceColor,
+      isTBAMode,
+      getScoutName,
+      getEffectiveYear,
+      earnEbucks,
+      refreshBalance,
+      showBetNotification,
+    ]
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
@@ -818,29 +839,44 @@ export default function MatchScoutScreen() {
             )}
 
             {selectedEventName && (
-              <TouchableOpacity
-                style={styles.selectMatchButton}
-                onPress={async () => {
-                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
-                  if (eventKey) {
-                    router.push({
-                      pathname: '/select-match' as any,
-                      params: { eventKey },
-                    });
-                  } else {
-                    handleSelectEvent();
-                  }
-                }}
-              >
-                <Text 
-                  style={styles.selectMatchButtonText}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit={true}
-                  minimumFontScale={0.7}
+              <>
+                <TouchableOpacity
+                  style={styles.selectMatchButton}
+                  onPress={() => router.push('/my-schedule' as any)}
                 >
-                  Choose Match and Team
-                </Text>
-              </TouchableOpacity>
+                  <Text 
+                    style={styles.selectMatchButtonText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.7}
+                  >
+                    Use Scouter Schedule
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.selectMatchButton}
+                  onPress={async () => {
+                    const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+                    if (eventKey) {
+                      router.push({
+                        pathname: '/select-match' as any,
+                        params: { eventKey },
+                      });
+                    } else {
+                      handleSelectEvent();
+                    }
+                  }}
+                >
+                  <Text 
+                    style={styles.selectMatchButtonText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.7}
+                  >
+                    Choose Match and Team
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
 
             <View style={styles.matchInfo}>
@@ -866,6 +902,49 @@ export default function MatchScoutScreen() {
                 />
               </View>
             </View>
+
+            {/* Alliance Color Selection */}
+            <View style={styles.allianceSection}>
+              <Text style={styles.inputLabel}>Alliance</Text>
+              <View style={styles.allianceRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.allianceButton,
+                    styles.redAllianceButton,
+                    allianceColor === 'red' && styles.redAllianceButtonActive,
+                  ]}
+                  onPress={async () => {
+                    setAllianceColor('red');
+                    await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'red');
+                  }}
+                >
+                  <Text style={[
+                    styles.allianceButtonText,
+                    allianceColor === 'red' && styles.allianceButtonTextActive,
+                  ]}>
+                    Red
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.allianceButton,
+                    styles.blueAllianceButton,
+                    allianceColor === 'blue' && styles.blueAllianceButtonActive,
+                  ]}
+                  onPress={async () => {
+                    setAllianceColor('blue');
+                    await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'blue');
+                  }}
+                >
+                  <Text style={[
+                    styles.allianceButtonText,
+                    allianceColor === 'blue' && styles.allianceButtonTextActive,
+                  ]}>
+                    Blue
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         ) : (
           <View style={styles.matchInfo}>
@@ -888,6 +967,51 @@ export default function MatchScoutScreen() {
                 keyboardType="number-pad"
                 placeholder="1234"
               />
+            </View>
+          </View>
+        )}
+
+        {/* Alliance Color - Manual mode */}
+        {!isTBAMode && (
+          <View style={styles.allianceSection}>
+            <Text style={styles.inputLabel}>Alliance</Text>
+            <View style={styles.allianceRow}>
+              <TouchableOpacity
+                style={[
+                  styles.allianceButton,
+                  styles.redAllianceButton,
+                  allianceColor === 'red' && styles.redAllianceButtonActive,
+                ]}
+                onPress={async () => {
+                  setAllianceColor('red');
+                  await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'red');
+                }}
+              >
+                <Text style={[
+                  styles.allianceButtonText,
+                  allianceColor === 'red' && styles.allianceButtonTextActive,
+                ]}>
+                  Red
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.allianceButton,
+                  styles.blueAllianceButton,
+                  allianceColor === 'blue' && styles.blueAllianceButtonActive,
+                ]}
+                onPress={async () => {
+                  setAllianceColor('blue');
+                  await AsyncStorage.setItem(SELECTED_ALLIANCE_KEY, 'blue');
+                }}
+              >
+                <Text style={[
+                  styles.allianceButtonText,
+                  allianceColor === 'blue' && styles.allianceButtonTextActive,
+                ]}>
+                  Blue
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -975,42 +1099,35 @@ export default function MatchScoutScreen() {
           )}
         </View>
 
-        {/* Notes - Only show in Endgame phase */}
-        {currentPhase.id === 'endgame' && (
-          <View 
-            ref={notesSectionRef} 
-            style={styles.notesSection}
-            onLayout={handleNotesSectionLayout}
-          >
-          <Text style={styles.inputLabel}>Notes (Optional)</Text>
-          <TextInput
-              ref={notesInputRef}
-            style={styles.notesInput}
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Additional observations..."
-            multiline
-            numberOfLines={3}
-              onFocus={handleNotesFocus}
-              onKeyPress={handleNotesKeyPress}
-          />
-        </View>
-        )}
-
-        {/* Save Button */}
+        {/* End Match Button */}
         <View ref={saveButtonContainerRef} onLayout={handleSaveButtonLayout}>
         <TouchableOpacity
           style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
+          onPress={handleEndMatch}
           disabled={isSaving}
         >
           <Text style={styles.saveButtonText}>
-            {isSaving ? 'Saving...' : 'Save Match'}
+            {isSaving ? 'Submitting...' : 'End Match'}
           </Text>
         </TouchableOpacity>
         </View>
       </ScrollView>
       </KeyboardAvoidingView>
+      <SurveyModal
+        visible={showSurveyModal}
+        onClose={async () => {
+          const id = pendingMatchIdRef.current;
+          if (id) {
+            try {
+              await db.deleteMatch(id);
+            } catch (_) {}
+            pendingMatchIdRef.current = null;
+          }
+          setShowSurveyModal(false);
+        }}
+        onSubmit={handleSurveySubmit}
+        isSubmitting={isSaving}
+      />
     </SafeAreaView>
   );
 }
@@ -1045,6 +1162,46 @@ const styles = {
     gap: 12,
     marginTop: 16,
     marginBottom: 16,
+  },
+  allianceSection: {
+    marginBottom: 16,
+  },
+  allianceRow: {
+    flexDirection: 'row' as const,
+    gap: 12,
+  },
+  allianceButton: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    borderWidth: 2,
+  },
+  redAllianceButton: {
+    backgroundColor: '#2a2222',
+    borderColor: '#5a4040',
+  },
+  redAllianceButtonActive: {
+    backgroundColor: '#3a2a2a',
+    borderColor: '#ef4444',
+  },
+  blueAllianceButton: {
+    backgroundColor: '#22222a',
+    borderColor: '#40405a',
+  },
+  blueAllianceButtonActive: {
+    backgroundColor: '#2a2a3a',
+    borderColor: '#3b82f6',
+  },
+  allianceButtonText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#888',
+  },
+  allianceButtonTextActive: {
+    color: '#fff',
   },
   inputGroup: {
     flex: 1,
@@ -1191,20 +1348,6 @@ const styles = {
   },
   selectOptionButtonTextActive: {
     color: 'white',
-  },
-  notesSection: {
-    marginBottom: 16,
-  },
-  notesInput: {
-    backgroundColor: '#2a2a2a',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#404040',
-    minHeight: 80,
-    textAlignVertical: 'top' as const,
-    color: '#fff',
   },
   saveButton: {
     backgroundColor: '#10b981',

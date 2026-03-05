@@ -59,8 +59,10 @@ export default function SelectTeamScreen() {
 
   const handleSelectTeam = async (teamNumber: number) => {
     const teamNumStr = teamNumber.toString();
+    const allianceColor = redTeams.includes(teamNumber) ? 'red' : 'blue';
     // Persist selection so index screen can load it even if params don't pass through
     await AsyncStorage.setItem('selected_team_number', teamNumStr);
+    await AsyncStorage.setItem('selected_alliance_color', allianceColor);
     // Navigate back to match scouting screen (replace to avoid stacking; AsyncStorage ensures data loads)
     router.replace({
       pathname: '/(tabs)' as any,
@@ -68,6 +70,7 @@ export default function SelectTeamScreen() {
         matchNumber,
         teamNumber: teamNumStr,
         fromTBA: 'true',
+        allianceColor,
       },
     });
   };

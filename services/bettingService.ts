@@ -1,10 +1,13 @@
 // services/bettingService.ts
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useDemoStore } from '@/stores/demoStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import tbaClient from '../api/client';
 import { TBAMatch } from '../api/types';
+import { db } from './database';
 import { LeagueAverage, TeamStatistics, teamStatisticsService } from './teamStatisticsService';
+import { supabaseSyncService } from './supabase.sync';
 
 /** Normal CDF approximation (Abramowitz & Stegun). Returns P(X <= x) for N(mean, std). */
 function normalCDF(x: number, mean: number, std: number): number {
@@ -65,6 +68,7 @@ export interface Bet {
   payout: number;
   resolvedAt?: string;
   createdAt: string;
+  isDemoMode?: boolean;
 }
 
 export interface AllianceData {
@@ -819,6 +823,33 @@ class BettingService {
   }
 
   /**
+   * Check if a match has already ended (scores posted). Uses TBA API.
+   * Fastest check: winning_alliance or alliance scores indicate match completion.
+   */
+  async isMatchEnded(matchKey: string): Promise<boolean> {
+    try {
+      const match = await this.getMatchResult(matchKey);
+      const redScore = match?.alliances?.red?.score;
+      const blueScore = match?.alliances?.blue?.score;
+      const winningAlliance = match?.winning_alliance;
+      console.warn('[TBA Match]', matchKey, JSON.stringify({
+        redScore,
+        blueScore,
+        winningAlliance,
+        alliances: match?.alliances ? { red: match.alliances.red, blue: match.alliances.blue } : undefined,
+      }));
+      if (!match?.alliances) return false;
+      // A match is ended if its score is >= 0, it is -1 if not yet played
+      const hasScores = typeof redScore === 'number' && typeof blueScore === 'number' && redScore >= 0 && blueScore >= 0;
+      const hasWinningAlliance = winningAlliance === 'red' || winningAlliance === 'blue';
+      return hasScores && hasWinningAlliance;
+    } catch (error) {
+      console.error('Error checking if match ended:', error);
+      return false;
+    }
+  }
+
+  /**
    * Place a bet
    */
   async placeBet(betData: BetData): Promise<string | null> {
@@ -831,6 +862,7 @@ class BettingService {
         throw new Error('No user identifier or team');
       }
 
+      const isDemoMode = useDemoStore.getState().isDemoMode;
       const { data, error } = await supabase
         .from('bets')
         .insert({
@@ -845,6 +877,7 @@ class BettingService {
           odds: betData.odds,
           potential_payout: betData.potentialPayout,
           status: 'pending',
+          is_demo_mode: isDemoMode,
         })
         .select('id')
         .single();
@@ -957,6 +990,7 @@ class BettingService {
         payout: row.payout || 0,
         resolvedAt: row.resolved_at,
         createdAt: row.created_at,
+        isDemoMode: row.is_demo_mode ?? false,
       }));
     } catch (error) {
       console.error('Error fetching user bets:', error);
@@ -995,6 +1029,7 @@ class BettingService {
         payout: row.payout || 0,
         resolvedAt: row.resolved_at,
         createdAt: row.created_at,
+        isDemoMode: row.is_demo_mode ?? false,
       }));
     } catch (error) {
       console.error('Error fetching match bets:', error);
@@ -1003,8 +1038,69 @@ class BettingService {
   }
 
   /**
+   * Check if anyone has scouted this match (local or team's Supabase).
+   * Used to block betting when the match has scouting data from any team member.
+   */
+  async hasMatchBeenScoutedByAnyone(matchResult: TBAMatch): Promise<boolean> {
+    const teamNumbers = [
+      ...matchResult.alliances.red.team_keys.map((k) => parseInt(k.replace('frc', ''), 10)),
+      ...matchResult.alliances.blue.team_keys.map((k) => parseInt(k.replace('frc', ''), 10)),
+    ];
+
+    await db.init();
+    for (const tn of teamNumbers) {
+      const inLocal = await db.checkMatchExists(matchResult.match_number, tn);
+      if (inLocal) return true;
+    }
+
+    const eventKey = matchResult.event_key || matchResult.key.split('_')[0];
+    const remoteMatches = await supabaseSyncService.getMatches(eventKey);
+    const inRemote = remoteMatches?.some(
+      (m: { match_number?: number; team_number?: number }) =>
+        m.match_number === matchResult.match_number &&
+        teamNumbers.includes(m.team_number ?? 0)
+    );
+    return !!inRemote;
+  }
+
+  /**
+   * Check if the current user has scouted this match (local or synced to Supabase).
+   * Used to delay bet resolution until the user has submitted their scouting data.
+   */
+  async hasCurrentUserScoutedMatch(matchResult: TBAMatch): Promise<boolean> {
+    const scoutName = await AsyncStorage.getItem('scout_name');
+    if (!scoutName?.trim()) return false;
+
+    const teamNumbers = [
+      ...matchResult.alliances.red.team_keys.map((k) => parseInt(k.replace('frc', ''), 10)),
+      ...matchResult.alliances.blue.team_keys.map((k) => parseInt(k.replace('frc', ''), 10)),
+    ];
+
+    await db.init();
+    for (const tn of teamNumbers) {
+      const inLocal = await db.checkMatchScoutedByScouter(
+        matchResult.match_number,
+        tn,
+        scoutName
+      );
+      if (inLocal) return true;
+    }
+
+    const eventKey = matchResult.event_key || matchResult.key.split('_')[0];
+    const remoteMatches = await supabaseSyncService.getMatches(eventKey);
+    const inRemote = remoteMatches?.some(
+      (m: { match_number?: number; team_number?: number; scout_name?: string }) =>
+        m.match_number === matchResult.match_number &&
+        teamNumbers.includes(m.team_number ?? 0) &&
+        (m.scout_name || '').trim() === scoutName.trim()
+    );
+    return !!inRemote;
+  }
+
+  /**
    * Check and resolve bets for a match.
    * Returns resolutions for the current user (for notifications).
+   * Only resolves after the current user has scouted and submitted the match.
    */
   async checkAndResolveBets(matchKey: string): Promise<Array<{ matchNumber: number; won: boolean; payout: number }>> {
     try {
@@ -1029,6 +1125,13 @@ class BettingService {
       const scoreBreakdown = matchResult.score_breakdown;
       if (!scoreBreakdown || !scoreBreakdown.red || !scoreBreakdown.blue) {
         console.log(`[Betting] Match ${matchKey} missing score breakdown. Cannot resolve bets.`);
+        return [];
+      }
+
+      // Don't resolve until the current user has scouted and submitted this match
+      const hasScouted = await this.hasCurrentUserScoutedMatch(matchResult);
+      if (!hasScouted) {
+        console.log(`[Betting] Match ${matchKey} not yet scouted by user. Waiting for submit before resolving.`);
         return [];
       }
 
@@ -1059,7 +1162,7 @@ class BettingService {
       console.log(`[Betting] Match ${matchKey} results: Red ${redScore} - Blue ${blueScore}, Winner: ${winningAlliance}`);
 
       // Compute all bet outcomes in memory (no DB calls)
-      const resolutions: Array<{ id: string; status: 'won' | 'lost'; payout: number; user_identifier: string; match_number: number }> = [];
+      const resolutions: Array<{ id: string; status: 'won' | 'lost'; payout: number; user_identifier: string; match_number: number; is_demo_mode: boolean }> = [];
       const userIdentifier = await this.getUserIdentifier();
 
       for (const bet of bets) {
@@ -1268,6 +1371,7 @@ class BettingService {
           payout,
           user_identifier: bet.user_identifier,
           match_number: bet.match_number ?? 0,
+          is_demo_mode: bet.is_demo_mode ?? false,
         });
         console.log(`[Betting] Resolved bet ${bet.id}: ${won ? 'WON' : 'LOST'}, payout: ${payout}`);
       }
@@ -1275,11 +1379,12 @@ class BettingService {
       // Batch resolve all bets in one RPC call (eliminates N+1)
       if (resolutions.length > 0) {
         const { error } = await supabase.rpc('resolve_bets_batch', {
-          resolutions: resolutions.map(({ id, status, payout, user_identifier }) => ({
+          resolutions: resolutions.map(({ id, status, payout, user_identifier, is_demo_mode }) => ({
             id,
             status,
             payout,
             user_identifier,
+            is_demo_mode: is_demo_mode ?? false,
           })),
         });
         if (error) {

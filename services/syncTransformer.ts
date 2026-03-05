@@ -20,6 +20,7 @@ export class SyncTransformer {
     metrics: Record<string, any>;
     calculated_points: number;
     notes?: string;
+    survey?: Record<string, any>;
     timestamp: number;
     event_key?: string;
   } {
@@ -47,6 +48,7 @@ export class SyncTransformer {
       metrics: metrics,
       calculated_points: calculatedPoints,
       notes: sqliteMatch.notes,
+      survey: sqliteMatch.survey,
       timestamp: sqliteMatch.timestamp,
       event_key: eventKey || undefined,
     };
@@ -221,6 +223,7 @@ export class SyncManager {
           metrics: transformed.metrics,
           calculated_points: transformed.calculated_points,
           notes: transformed.notes,
+          survey: transformed.survey,
         });
 
         if (success) {

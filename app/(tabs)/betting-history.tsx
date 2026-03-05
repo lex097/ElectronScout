@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import {
+    Alert,
     Animated,
     RefreshControl,
     ScrollView,
@@ -15,21 +16,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bet } from '../../services/bettingService';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
-import { useEbucksStore } from '../../stores/ebucksStore';
+import { useEbucksStore, useEffectiveBalance } from '../../stores/ebucksStore';
 import { useUserBets } from '../../hooks/useUserBets';
 import { useLeaderboard } from '../../hooks/useLeaderboard';
 import { queryKeys } from '../../config/queryKeys';
+import { useAdminStore } from '../../stores/adminStore';
+import { useDemoStore } from '../../stores/demoStore';
 
 export default function BettingHistoryScreen() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'history' | 'leaderboard'>('history');
   const [filter, setFilter] = useState<'all' | 'pending' | 'won' | 'lost'>('all');
+  const [isResetting, setIsResetting] = useState(false);
   const user = useAuthStore((state) => state.user);
-  const balance = useEbucksStore((state) => state.balance);
+  const balance = useEffectiveBalance();
   const refreshBalance = useEbucksStore((state) => state.refreshBalance);
+  const isAdminUnlocked = useAdminStore((s) => s.isUnlocked(Date.now()));
   const subscriptionRef = useRef<any>(null);
   const prevBalanceRef = useRef<number>(balance);
 
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
   const betsQuery = useUserBets();
   const leaderboardQuery = useLeaderboard(user?.teamNumber ?? null);
   const bets = betsQuery.data ?? [];
@@ -155,6 +161,38 @@ export default function BettingHistoryScreen() {
     } catch {
       return dateString;
     }
+  };
+
+  const handleResetLeaderboard = () => {
+    Alert.alert(
+      'Reset Leaderboard',
+      'Are you sure you want to reset the leaderboard? All team members\' points will be set to 0. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            setIsResetting(true);
+            try {
+              const { error } = await supabase.rpc('reset_leaderboard');
+              if (error) throw error;
+              if (user?.teamNumber) {
+                queryClient.invalidateQueries({
+                  queryKey: queryKeys.bets.leaderboard(user.teamNumber),
+                });
+              }
+              await refreshBalance();
+            } catch (err) {
+              console.error('Reset leaderboard error:', err);
+              Alert.alert('Error', 'Failed to reset leaderboard. Please try again.');
+            } finally {
+              setIsResetting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Skeleton loader component (pulsing opacity)
@@ -401,6 +439,18 @@ export default function BettingHistoryScreen() {
         leaderboardQuery.isLoading ? (
           renderLeaderboardSkeleton()
         ) : (
+        <View style={styles.leaderboardContainer}>
+          {isAdminUnlocked && (
+            <TouchableOpacity
+              style={[styles.resetButton, isResetting && styles.resetButtonDisabled]}
+              onPress={handleResetLeaderboard}
+              disabled={isResetting}
+            >
+              <Text style={styles.resetButtonText}>
+                {isResetting ? 'Resetting…' : 'Reset Leaderboard'}
+              </Text>
+            </TouchableOpacity>
+          )}
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -467,7 +517,7 @@ export default function BettingHistoryScreen() {
                         isCurrentUser && styles.leaderboardBalanceTextCurrent,
                       ]}
                     >
-                      {entry.balance.toLocaleString()} ebucks
+                      {(isDemoMode ? entry.balanceDemo : entry.balance).toLocaleString()} ebucks
                     </Text>
                   </View>
                 </View>
@@ -475,6 +525,7 @@ export default function BettingHistoryScreen() {
             })
           )}
         </ScrollView>
+        </View>
         )
       )}
     </SafeAreaView>
@@ -545,6 +596,29 @@ const styles = StyleSheet.create({
   },
   filterTabTextActive: {
     color: '#ff6600',
+    fontWeight: '600',
+  },
+  leaderboardContainer: {
+    flex: 1,
+  },
+  resetButton: {
+    alignSelf: 'flex-start',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#3a2a1a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ff6600',
+  },
+  resetButtonDisabled: {
+    opacity: 0.6,
+  },
+  resetButtonText: {
+    color: '#ff6600',
+    fontSize: 14,
     fontWeight: '600',
   },
   scrollView: {

@@ -8,4 +8,6 @@ export interface MatchData {
     timestamp: number;
     synced: boolean;
     notes?: string;
+    survey?: Record<string, any>;
+    allianceColor?: 'red' | 'blue';
   }

@@ -76,6 +76,8 @@ class DatabaseService {
         timestamp INTEGER NOT NULL,
         synced INTEGER DEFAULT 0,
         notes TEXT,
+        survey TEXT,
+        alliance TEXT,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       );
 
@@ -83,6 +85,18 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_team_number ON matches(team_number);
       CREATE INDEX IF NOT EXISTS idx_synced ON matches(synced);
     `);
+    // Add alliance column if it doesn't exist (for existing DBs)
+    try {
+      await this.db!.execAsync(`ALTER TABLE matches ADD COLUMN alliance TEXT`);
+    } catch {
+      // Column already exists, ignore
+    }
+    // Add survey column if it doesn't exist
+    try {
+      await this.db!.execAsync(`ALTER TABLE matches ADD COLUMN survey TEXT`);
+    } catch {
+      // Column already exists, ignore
+    }
   }
 
   // Save a match (insert or update)
@@ -92,8 +106,8 @@ class DatabaseService {
       if (!this.db) throw new Error('Database not initialized');
       await this.db.runAsync(
         `INSERT OR REPLACE INTO matches 
-         (id, match_number, team_number, scouter_id, game_year, metrics, timestamp, synced, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, match_number, team_number, scouter_id, game_year, metrics, timestamp, synced, notes, survey, alliance)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           match.id,
           match.matchNumber,
@@ -103,7 +117,9 @@ class DatabaseService {
           JSON.stringify(match.metrics),
           match.timestamp,
           match.synced ? 1 : 0,
-          match.notes || null
+          match.notes || null,
+          match.survey ? JSON.stringify(match.survey) : null,
+          match.allianceColor || null
         ]
       );
     });
@@ -201,6 +217,22 @@ class DatabaseService {
     return (result?.count || 0) > 0;
   }
 
+  // Check if current scouter has already scouted this match/team
+  async checkMatchScoutedByScouter(
+    matchNumber: number,
+    teamNumber: number,
+    scouterId: string
+  ): Promise<boolean> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM matches WHERE match_number = ? AND team_number = ? AND scouter_id = ?',
+      [matchNumber, teamNumber, scouterId]
+    );
+
+    return (result?.count || 0) > 0;
+  }
+
   // Helper to convert DB row to MatchData
   private rowToMatch(row: any): MatchData {
     return {
@@ -212,7 +244,9 @@ class DatabaseService {
       metrics: JSON.parse(row.metrics),
       timestamp: row.timestamp,
       synced: row.synced === 1,
-      notes: row.notes
+      notes: row.notes,
+      survey: row.survey ? JSON.parse(row.survey) : undefined,
+      allianceColor: row.alliance === 'red' || row.alliance === 'blue' ? row.alliance : undefined
     };
   }
 }

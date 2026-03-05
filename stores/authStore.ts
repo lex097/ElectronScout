@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { setAuthTokenProvider } from '@/lib/authTokenProvider';
 import { edgeFunctions } from '@/lib/edgeFunctions';
+import { useAdminStore } from '@/stores/adminStore';
 
 const SCOUT_NAME_KEY = 'scout_name';
 const TEAM_NUMBER_KEY = 'team_number';
@@ -113,6 +114,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         SCOUT_NAME_KEY, TEAM_NUMBER_KEY, TEAM_ID_KEY,
         ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY,
       ]);
+      useAdminStore.getState().lock();
       set({ user: null, isAuthenticated: false });
     },
 

@@ -3,23 +3,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TBAMatch } from '../../api/types';
-import { BetData, bettingService, MatchOdds } from '../../services/bettingService';
-import { useEbucksStore } from '../../stores/ebucksStore';
 import { queryKeys } from '../../config/queryKeys';
+import { BetData, bettingService, MatchOdds } from '../../services/bettingService';
+import { useDemoStore } from '../../stores/demoStore';
+import { useEbucksStore, useEffectiveBalance } from '../../stores/ebucksStore';
 
 interface BettingModalProps {
   visible: boolean;
@@ -40,6 +41,8 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   const [hasFullOdds, setHasFullOdds] = useState(true);
   const [betAmount, setBetAmount] = useState('');
   const [isPlacingBet, setIsPlacingBet] = useState(false);
+  const [matchEndedBlock, setMatchEndedBlock] = useState<string | null>(null); // Message if match already ended (non-demo)
+  const [matchScoutedBlock, setMatchScoutedBlock] = useState<string | null>(null); // Message if match already scouted
   const insets = useSafeAreaInsets();
   
   // Winner bet state
@@ -63,9 +66,10 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
     odds: number;
   }>>([]);
 
-  const balance = useEbucksStore((state) => state.balance);
+  const balance = useEffectiveBalance();
   const spendEbucks = useEbucksStore((state) => state.spendEbucks);
   const refreshBalance = useEbucksStore((state) => state.refreshBalance);
+  const isDemoMode = useDemoStore((s) => s.isDemoMode);
 
   const redTeams = match.alliances.red.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
   const blueTeams = match.alliances.blue.team_keys.map((key) => parseInt(key.replace('frc', ''), 10));
@@ -73,6 +77,8 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   // Load odds when modal opens; uses single optimized fetch (eligibility + odds in one pass)
   useEffect(() => {
     if (visible) {
+      setMatchEndedBlock(null);
+      setMatchScoutedBlock(null);
       loadBettingData();
     } else {
       setActiveTab('winner');
@@ -84,12 +90,56 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
       setSelectedThreshold(null);
       setOverUnder(null);
       setParlayBets([]);
+      setMatchEndedBlock(null);
+      setMatchScoutedBlock(null);
     }
   }, [visible, eventKey, match.key]);
 
   const loadBettingData = async () => {
+    console.warn('[BettingModal] loadBettingData started, match.key:', match.key);
     setIsLoadingOdds(true);
+    setMatchEndedBlock(null);
+    setMatchScoutedBlock(null);
     try {
+      // Always fetch match from TBA for logging; non-demo: block if match already ended
+      const ended = await bettingService.isMatchEnded(match.key);
+      console.warn('[BettingModal] isMatchEnded result:', ended);
+      if (!isDemoMode && ended) {
+          setMatchEndedBlock('You cannot bet on a match that has already ended.');
+          setHasFullOdds(false);
+          setOdds({
+            redWinProbability: 0.5,
+            blueWinProbability: 0.5,
+            redOdds: 2, blueOdds: 2,
+            expectedMargin: 0, expectedTotal: 0,
+            matchConfidence: 0,
+            redAverage: 0, blueAverage: 0,
+            marginStd: 0, totalStd: 0,
+          });
+          setIsLoadingOdds(false);
+          return;
+        }
+
+      // Block if anyone has already scouted this match (local or team's Supabase) - non-demo only
+      if (!isDemoMode) {
+        const scouted = await bettingService.hasMatchBeenScoutedByAnyone(match);
+        if (scouted) {
+          setMatchScoutedBlock('This match has already been scouted. Betting is not allowed.');
+          setHasFullOdds(false);
+          setOdds({
+            redWinProbability: 0.5,
+            blueWinProbability: 0.5,
+            redOdds: 2, blueOdds: 2,
+            expectedMargin: 0, expectedTotal: 0,
+            matchConfidence: 0,
+            redAverage: 0, blueAverage: 0,
+            marginStd: 0, totalStd: 0,
+          });
+          setIsLoadingOdds(false);
+          return;
+        }
+      }
+
       const { hasFullOdds: full, odds: o } = await bettingService.getBettingDataOrFallback(
         redTeams,
         blueTeams,
@@ -143,6 +193,12 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   };
 
   const handlePlaceBet = async () => {
+    const blockMsg = matchEndedBlock || matchScoutedBlock;
+    if (blockMsg) {
+      Alert.alert('Cannot Place Bet', blockMsg);
+      return;
+    }
+
     const amount = parseInt(betAmount, 10);
     
     if (!amount || amount < 5) {
@@ -976,7 +1032,15 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
           </View>
         </View>
 
-        {isLoadingOdds ? (
+        {matchEndedBlock || matchScoutedBlock ? (
+          /* Match ended or already scouted - show ineligibility message, no betting options */
+          <View style={styles.matchEndedContainer}>
+            <View style={styles.matchEndedBlock}>
+              <Ionicons name="alert-circle-outline" size={48} color="#fca5a5" style={styles.matchEndedIcon} />
+              <Text style={styles.matchEndedBlockText}>{matchEndedBlock || matchScoutedBlock}</Text>
+            </View>
+          </View>
+        ) : isLoadingOdds ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#ff6600" />
             <Text style={styles.loadingText}>Calculating odds...</Text>
@@ -1593,6 +1657,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     borderTopWidth: 1,
     borderTopColor: '#404040',
+  },
+  matchEndedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  matchEndedBlock: {
+    backgroundColor: '#3a2020',
+    padding: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    alignItems: 'center',
+    maxWidth: 320,
+  },
+  matchEndedIcon: {
+    marginBottom: 16,
+  },
+  matchEndedBlockText: {
+    color: '#fca5a5',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
   },
   placeBetButton: {
     backgroundColor: '#ff6600',

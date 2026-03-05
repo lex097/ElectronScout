@@ -204,6 +204,7 @@ export class SupabaseSyncService {
     metrics?: Record<string, any>;
     calculated_points?: number;
     notes?: string;
+    survey?: Record<string, any>;
   }): Promise<boolean> {
     try {
       const result = await edgeFunctions.updateMatch(matchId, updates);

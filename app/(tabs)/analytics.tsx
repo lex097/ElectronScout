@@ -9,8 +9,10 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Modal,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
@@ -30,6 +32,7 @@ import { supabaseSyncService } from '../../services/supabase.sync';
 type SortField = 'avgScore' | 'avgAuto' | 'avgTeleop' | 'avgEndgame';
 type SortDirection = 'asc' | 'desc';
 type DataSource = 'local' | 'team';
+type AllianceFilter = 'overall' | 'red' | 'blue';
 
 export default function AnalyticsScreen() {
   const queryClient = useQueryClient();
@@ -37,9 +40,14 @@ export default function AnalyticsScreen() {
   const [sortField, setSortField] = useState<SortField>('avgScore');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
+  const [allianceFilterByTeam, setAllianceFilterByTeam] = useState<Record<number, AllianceFilter>>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [dataSource, setDataSource] = useState<DataSource>('local');
+  const [surveyMatchForModal, setSurveyMatchForModal] = useState<MatchData | null>(null);
+  const [surveyModalVisible, setSurveyModalVisible] = useState(false); // Keeps modal mounted during exit animation
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const contentTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
   // My Data: load directly from local SQLite, no caching - display immediately
   const [localMatches, setLocalMatches] = useState<MatchData[]>([]);
@@ -48,6 +56,38 @@ export default function AnalyticsScreen() {
   const teamQuery = useAnalyticsTeam(eventKey);
   const teamMatches = teamQuery.data?.matches ?? [];
   const teamTeamAnalytics = teamQuery.data?.teamAnalytics ?? new Map<number, TeamAnalytics>();
+
+  // Survey modal: backdrop fades in (fixed), content slides up
+  useEffect(() => {
+    if (surveyMatchForModal) {
+      setSurveyModalVisible(true);
+      backdropOpacity.setValue(0);
+      contentTranslateY.setValue(Dimensions.get('window').height);
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(contentTranslateY, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 65,
+          friction: 11,
+        }),
+      ]).start();
+    }
+  }, [surveyMatchForModal]);
+
+  const closeSurveyModal = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(backdropOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(contentTranslateY, {
+        toValue: Dimensions.get('window').height,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setSurveyMatchForModal(null);
+      setSurveyModalVisible(false);
+    });
+  }, [backdropOpacity, contentTranslateY]);
 
   const loadLocalData = useCallback(async () => {
     const allMatches = await db.getAllMatches();
@@ -320,15 +360,87 @@ export default function AnalyticsScreen() {
     return maxPoints || 100; // Default to 100 if no data
   };
 
-  const getMatchPointsData = (team: TeamAnalytics) => {
-    // Sort matches by match number
-    const sortedMatches = [...team.matchHistory].sort((a, b) => a.matchNumber - b.matchNumber);
-    
-    // Calculate points for each match
+  const getMatchPointsData = (team: TeamAnalytics, filterMatches?: MatchData[]) => {
+    const matchesToUse = filterMatches ?? team.matchHistory;
+    const sortedMatches = [...matchesToUse].sort((a, b) => a.matchNumber - b.matchNumber);
     const points = sortedMatches.map(match => calculateMatchPoints(match.metrics));
     const labels = sortedMatches.map(match => `M${match.matchNumber}`);
-    
     return { points, labels };
+  };
+
+  /** Get matches filtered by alliance for a team */
+  const getFilteredMatches = (team: TeamAnalytics, filter: AllianceFilter): MatchData[] => {
+    if (filter === 'overall') return team.matchHistory;
+    return team.matchHistory.filter((m) => m.allianceColor === filter);
+  };
+
+  /** Get average phase points for filtered matches */
+  const getFilteredAveragePhasePoints = (
+    team: TeamAnalytics,
+    phaseId: string,
+    filter: AllianceFilter
+  ): number => {
+    const filtered = getFilteredMatches(team, filter);
+    if (filtered.length === 0) return 0;
+    const total = filtered.reduce((sum, m) => sum + calculatePhasePoints(m.metrics, phaseId), 0);
+    return Math.round((total / filtered.length) * 10) / 10;
+  };
+
+  /** Get filtered average total points */
+  const getFilteredAveragePoints = (team: TeamAnalytics, filter: AllianceFilter): number => {
+    const filtered = getFilteredMatches(team, filter);
+    if (filtered.length === 0) return 0;
+    const total = filtered.reduce((sum, m) => sum + calculateMatchPoints(m.metrics), 0);
+    return Math.round((total / filtered.length) * 100) / 100;
+  };
+
+  /** Get survey rating averages for a team (from survey.defense, survey.driving, etc.) */
+  const getSurveyRatingAverages = (
+    team: TeamAnalytics,
+    filter: AllianceFilter
+  ): Array<{ label: string; average: number; count: number }> => {
+    const filtered = getFilteredMatches(team, filter);
+    const ratingQuestions = ACTIVE_GAME_CONFIG.survey.filter((q) => q.type === 'rating');
+    if (ratingQuestions.length === 0) return [];
+    return ratingQuestions.map((q) => {
+      const values = filtered
+        .map((m) => m.survey?.[q.id])
+        .filter((v): v is number => typeof v === 'number' && v >= 1 && v <= 5);
+      const count = values.length;
+      const average =
+        count > 0
+          ? Math.round((values.reduce((s, v) => s + v, 0) / count) * 10) / 10
+          : 0;
+      return { label: q.label, average, count };
+    });
+  };
+
+  /** Get filtered metrics stats (avg, max, min) for display */
+  const getFilteredMetrics = (
+    team: TeamAnalytics,
+    filter: AllianceFilter
+  ): TeamAnalytics['metrics'] => {
+    const filtered = getFilteredMatches(team, filter);
+    if (filtered.length === 0) return {};
+    const metrics: TeamAnalytics['metrics'] = {};
+    const metricKeys = new Set<string>();
+    filtered.forEach((m) => Object.keys(m.metrics).forEach((k) => metricKeys.add(k)));
+    metricKeys.forEach((key) => {
+      const values = filtered
+        .map((m) => m.metrics[key])
+        .filter((v): v is number => typeof v === 'number');
+      if (values.length > 0) {
+        const total = values.reduce((s, v) => s + v, 0);
+        metrics[key] = {
+          average: Math.round((total / values.length) * 100) / 100,
+          total,
+          max: Math.max(...values),
+          min: Math.min(...values),
+          stdDev: 0,
+        };
+      }
+    });
+    return metrics;
   };
 
   // SVG Line Chart Component (using react-native-svg)
@@ -481,6 +593,10 @@ export default function AnalyticsScreen() {
 
   const renderTeamCard = (team: TeamAnalytics) => {
     const isExpanded = selectedTeam === team.teamNumber;
+    const allianceFilter = allianceFilterByTeam[team.teamNumber] ?? 'overall';
+    const filteredMatches = getFilteredMatches(team, allianceFilter);
+    const setAllianceFilter = (f: AllianceFilter) =>
+      setAllianceFilterByTeam((prev) => ({ ...prev, [team.teamNumber]: f }));
 
     return (
       <TouchableOpacity
@@ -501,25 +617,91 @@ export default function AnalyticsScreen() {
 
         {isExpanded && (
           <View style={styles.teamCardExpanded}>
+            {/* Alliance filter - above auto/teleop/endgame */}
+            <View style={styles.allianceFilterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.allianceFilterButton,
+                  allianceFilter === 'overall' && styles.allianceFilterButtonActive,
+                ]}
+                onPress={() => setAllianceFilter('overall')}
+              >
+                <Text
+                  style={[
+                    styles.allianceFilterButtonText,
+                    allianceFilter === 'overall' && styles.allianceFilterButtonTextActive,
+                  ]}
+                >
+                  Overall
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.allianceFilterButton,
+                  styles.redAllianceFilterButton,
+                  allianceFilter === 'red' && styles.redAllianceFilterButtonActive,
+                ]}
+                onPress={() => setAllianceFilter('red')}
+              >
+                <Text
+                  style={[
+                    styles.allianceFilterButtonText,
+                    allianceFilter === 'red' && styles.allianceFilterButtonTextActive,
+                  ]}
+                >
+                  Red
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.allianceFilterButton,
+                  styles.blueAllianceFilterButton,
+                  allianceFilter === 'blue' && styles.blueAllianceFilterButtonActive,
+                ]}
+                onPress={() => setAllianceFilter('blue')}
+              >
+                <Text
+                  style={[
+                    styles.allianceFilterButtonText,
+                    allianceFilter === 'blue' && styles.allianceFilterButtonTextActive,
+                  ]}
+                >
+                  Blue
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.pointsSummary}>
               <View style={styles.pointsBox}>
-                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'auto').toFixed(1)}</Text>
+                <Text style={styles.pointsValue}>
+                  {getFilteredAveragePhasePoints(team, 'auto', allianceFilter).toFixed(1)}
+                </Text>
                 <Text style={styles.pointsLabel}>Avg Auto/Match</Text>
               </View>
               <View style={styles.pointsBox}>
-                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'teleop').toFixed(1)}</Text>
+                <Text style={styles.pointsValue}>
+                  {getFilteredAveragePhasePoints(team, 'teleop', allianceFilter).toFixed(1)}
+                </Text>
                 <Text style={styles.pointsLabel}>Avg Teleop/Match</Text>
               </View>
               <View style={styles.pointsBox}>
-                <Text style={styles.pointsValue}>{getAveragePhasePoints(team, 'endgame').toFixed(1)}</Text>
+                <Text style={styles.pointsValue}>
+                  {getFilteredAveragePhasePoints(team, 'endgame', allianceFilter).toFixed(1)}
+                </Text>
                 <Text style={styles.pointsLabel}>Avg Endgame/Match</Text>
               </View>
             </View>
 
+            {allianceFilter !== 'overall' && (
+              <Text style={styles.filteredMatchCount}>
+                {filteredMatches.length} match{filteredMatches.length !== 1 ? 'es' : ''} on {allianceFilter} alliance
+              </Text>
+            )}
+
             <View style={styles.progressChartContainer}>
               <Text style={styles.sectionLabel}>Performance Progress</Text>
-              {team.matchHistory.length > 0 && (() => {
-                const { points, labels } = getMatchPointsData(team);
+              {filteredMatches.length > 0 && (() => {
+                const { points, labels } = getMatchPointsData(team, filteredMatches);
                 const maxPoints = getMaxPointsAcrossAllTeams();
                 
                 return (
@@ -531,7 +713,9 @@ export default function AnalyticsScreen() {
             </View>
 
             <Text style={styles.sectionLabel}>Metrics Breakdown</Text>
-            {Object.entries(team.metrics).map(([metricId, stats]) => {
+            {Object.entries(
+              allianceFilter === 'overall' ? team.metrics : getFilteredMetrics(team, allianceFilter)
+            ).map(([metricId, stats]) => {
               const metric = ACTIVE_GAME_CONFIG.phases
                 .flatMap(p => p.metrics)
                 .find(m => m.id === metricId);
@@ -559,8 +743,22 @@ export default function AnalyticsScreen() {
               );
             })}
 
+            {getSurveyRatingAverages(team, allianceFilter).length > 0 && (
+              <>
+                <Text style={styles.sectionLabel}>Survey Ratings (Avg)</Text>
+                {getSurveyRatingAverages(team, allianceFilter).map(({ label, average, count }) => (
+                  <View key={label} style={styles.metricRow}>
+                    <Text style={styles.metricName}>{label}</Text>
+                    <Text style={styles.statValue}>
+                      {average > 0 ? average.toFixed(1) : '-'} ({count})
+                    </Text>
+                  </View>
+                ))}
+              </>
+            )}
+
             <Text style={styles.sectionLabel}>Recent Matches</Text>
-            {team.matchHistory.slice(-3).reverse().map(match => (
+            {filteredMatches.slice(-3).reverse().map(match => (
               <View key={match.id} style={styles.matchHistoryItem}>
                 <View style={styles.matchHistoryInfo}>
                 <Text style={styles.matchHistoryText}>
@@ -570,14 +768,23 @@ export default function AnalyticsScreen() {
                   {new Date(match.timestamp).toLocaleDateString()}
                 </Text>
                 </View>
-                {dataSource === 'local' && (
+                <View style={styles.matchHistoryActions}>
                   <TouchableOpacity
-                    onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
-                    style={styles.deleteMatchButton}
+                    onPress={() => setSurveyMatchForModal(match)}
+                    style={styles.notesMatchButton}
                   >
-                    <Ionicons name="close-circle" size={24} color="#ef4444" />
+                    <Ionicons name="document-text-outline" size={22} color="#ff6600" />
+                    <Text style={styles.notesMatchButtonText}>Notes</Text>
                   </TouchableOpacity>
-                )}
+                  {dataSource === 'local' && (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
+                      style={styles.deleteMatchButton}
+                    >
+                      <Ionicons name="close-circle" size={24} color="#ef4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             ))}
           </View>
@@ -930,6 +1137,73 @@ export default function AnalyticsScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Survey Results Modal - backdrop fades in place, content slides up */}
+      <Modal
+        visible={surveyModalVisible}
+        animationType="none"
+        transparent
+        onRequestClose={closeSurveyModal}
+      >
+        <View style={styles.surveyModalContainer}>
+          <Animated.View
+            style={[StyleSheet.absoluteFill, styles.surveyModalBackdrop, { opacity: backdropOpacity }]}
+            pointerEvents="none"
+          />
+          <TouchableOpacity
+            style={styles.surveyModalBackdropTapArea}
+            activeOpacity={1}
+            onPress={closeSurveyModal}
+          />
+          <Animated.View
+            style={[
+              styles.surveyModalContentWrapper,
+              { transform: [{ translateY: contentTranslateY }] },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.surveyModalContent}>
+            {surveyMatchForModal && (
+              <>
+                <View style={styles.surveyModalHeader}>
+                  <Text style={styles.surveyModalTitle}>
+                    Match {surveyMatchForModal.matchNumber} – Team {surveyMatchForModal.teamNumber}
+                  </Text>
+                  <TouchableOpacity onPress={closeSurveyModal}>
+                    <Text style={styles.surveyModalClose}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  style={styles.surveyModalScroll}
+                  contentContainerStyle={styles.surveyModalScrollContent}
+                  showsVerticalScrollIndicator
+                >
+                  {ACTIVE_GAME_CONFIG.survey.map((q) => {
+                    const val = surveyMatchForModal.survey?.[q.id];
+                    let display: string;
+                    if (q.type === 'rating') {
+                      display = typeof val === 'number' ? `${val}/5` : '-';
+                    } else if (q.type === 'singleChoice') {
+                      display = typeof val === 'string' ? val : '-';
+                    } else if (q.type === 'multipleChoice') {
+                      display = Array.isArray(val) ? val.join(', ') || '-' : '-';
+                    } else {
+                      display = typeof val === 'string' ? val || '-' : '-';
+                    }
+                    return (
+                      <View key={q.id} style={styles.surveyModalRow}>
+                        <Text style={styles.surveyModalLabel}>{q.label}</Text>
+                        <Text style={styles.surveyModalValue}>{display}</Text>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1126,6 +1400,54 @@ const styles = {
     borderTopWidth: 1,
     borderTopColor: '#404040',
   },
+  allianceFilterRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginBottom: 16,
+  },
+  allianceFilterButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    backgroundColor: '#404040',
+    borderWidth: 2,
+    borderColor: '#505050',
+  },
+  allianceFilterButtonActive: {
+    backgroundColor: '#2a2a2a',
+    borderColor: '#ff6600',
+  },
+  redAllianceFilterButton: {
+    backgroundColor: '#2a2222',
+    borderColor: '#5a4040',
+  },
+  redAllianceFilterButtonActive: {
+    backgroundColor: '#3a2a2a',
+    borderColor: '#ef4444',
+  },
+  blueAllianceFilterButton: {
+    backgroundColor: '#22222a',
+    borderColor: '#40405a',
+  },
+  blueAllianceFilterButtonActive: {
+    backgroundColor: '#2a2a3a',
+    borderColor: '#3b82f6',
+  },
+  allianceFilterButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#888',
+  },
+  allianceFilterButtonTextActive: {
+    color: '#fff',
+  },
+  filteredMatchCount: {
+    fontSize: 12,
+    color: '#b0b0b0',
+    marginBottom: 12,
+  },
   pointsSummary: {
     flexDirection: 'row' as const,
     gap: 12,
@@ -1198,9 +1520,82 @@ const styles = {
     fontSize: 12,
     color: '#b0b0b0',
   },
+  matchHistoryActions: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  notesMatchButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    padding: 4,
+  },
+  notesMatchButtonText: {
+    fontSize: 13,
+    color: '#ff6600',
+    fontWeight: '600' as const,
+  },
   deleteMatchButton: {
     padding: 4,
-    marginLeft: 8,
+  },
+  surveyModalContainer: {
+    flex: 1,
+  },
+  surveyModalBackdrop: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  surveyModalBackdropTapArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  surveyModalContentWrapper: {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: Dimensions.get('window').height * 0.85,
+  },
+  surveyModalContent: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  surveyModalHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#404040',
+  },
+  surveyModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold' as const,
+    color: '#ff6600',
+  },
+  surveyModalClose: {
+    fontSize: 16,
+    color: '#b0b0b0',
+  },
+  surveyModalScroll: {
+    flex: 1,
+  },
+  surveyModalScrollContent: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  surveyModalRow: {
+    marginBottom: 16,
+  },
+  surveyModalLabel: {
+    fontSize: 14,
+    color: '#b0b0b0',
+    marginBottom: 4,
+  },
+  surveyModalValue: {
+    fontSize: 16,
+    color: '#fff',
   },
   footer: {
     padding: 16,

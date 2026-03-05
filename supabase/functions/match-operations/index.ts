@@ -128,12 +128,13 @@ Deno.serve(async (req) => {
           metrics: match.metrics,
           calculated_points: match.calculated_points,
           notes: match.notes,
+          survey: match.survey || null,
           timestamp: match.timestamp,
         };
 
         const { error } = await supabase
           .from('matches')
-          .insert(insertData);
+          .upsert(insertData, { onConflict: 'id' });
 
         result = { success: !error };
         break;
@@ -166,6 +167,7 @@ Deno.serve(async (req) => {
           metrics?: Record<string, unknown>;
           calculated_points?: number;
           notes?: string;
+          survey?: Record<string, unknown>;
           timestamp?: string;
         }
 
@@ -186,6 +188,7 @@ Deno.serve(async (req) => {
             metrics: m.metrics,
             calculated_points: m.calculated_points,
             notes: m.notes,
+            survey: m.survey || null,
             timestamp: m.timestamp,
           }));
 
@@ -193,7 +196,7 @@ Deno.serve(async (req) => {
 
           const { data, error } = await supabase
             .from('matches')
-            .insert(insertData)
+            .upsert(insertData, { onConflict: 'id' })
             .select('id');
 
           if (error) {
@@ -342,6 +345,7 @@ Deno.serve(async (req) => {
             gameYear: m.game_year,
             metrics: m.metrics,
             notes: m.notes || '',
+            survey: m.survey || null,
             timestamp: m.timestamp,
             synced: true,
           })),

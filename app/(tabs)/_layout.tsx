@@ -8,7 +8,7 @@ import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useAuthStore } from '@/stores/authStore';
-import { useEbucksStore } from '@/stores/ebucksStore';
+import { useEbucksStore, useEffectiveBalance } from '@/stores/ebucksStore';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -22,7 +22,7 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { user, isAuthenticated, isLoading, logout } = useAuthStore();
   const initializeEbucks = useEbucksStore((state) => state.initialize);
-  const balance = useEbucksStore((state) => state.balance);
+  const balance = useEffectiveBalance();
 
   useEffect(() => {
     if (!isLoading) {

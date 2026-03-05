@@ -6,22 +6,13 @@ import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AdminTabScreen() {
-  const unlockedAtMs = useAdminStore((s) => s.unlockedAtMs);
-  const sessionTtlMs = useAdminStore((s) => s.sessionTtlMs);
+  const isUnlocked = useAdminStore((s) => s.isUnlocked());
   const initialize = useAdminStore((s) => s.initialize);
-  const [nowMs, setNowMs] = React.useState(() => Date.now());
 
   // Initialize persisted unlock state on mount
   React.useEffect(() => {
     initialize();
   }, [initialize]);
-
-  React.useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  const isUnlocked = !!unlockedAtMs && nowMs - unlockedAtMs <= sessionTtlMs;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>

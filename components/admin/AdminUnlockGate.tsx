@@ -28,8 +28,7 @@ export function AdminUnlockGate() {
     return Number.isFinite(num) ? num : null;
   }, [user?.teamNumber]);
 
-  // Removed AppState lock - admin session now persists across app backgrounding
-  // Session will still expire based on sessionTtlMs (15 minutes)
+  // Admin session persists until user taps Lock (no time-based expiry)
 
   // keep lock countdown UI fresh
   useEffect(() => {

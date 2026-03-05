@@ -8,12 +8,11 @@ type AdminState = {
   lastFailureAtMs: number | null;
 
   // Config
-  sessionTtlMs: number; // auto-lock after unlock
   maxAttemptsBeforeLock: number;
   baseLockMs: number;
 
   // Derived
-  isUnlocked: (nowMs?: number) => boolean;
+  isUnlocked: () => boolean;
   canAttempt: (nowMs?: number) => { ok: true } | { ok: false; reason: 'locked'; lockUntilMs: number };
 
   // Actions
@@ -25,28 +24,18 @@ type AdminState = {
 };
 
 const ADMIN_UNLOCK_KEY = 'admin_unlocked_at_ms';
-const ADMIN_SESSION_TTL_KEY = 'admin_session_ttl_ms';
 
 function now() {
   return Date.now();
 }
 
-// Load persisted unlock state from AsyncStorage
-async function loadPersistedUnlock(sessionTtlMs: number = 15 * 60 * 1000): Promise<number | null> {
+// Load persisted unlock state from AsyncStorage (no expiry - permanent until user locks)
+async function loadPersistedUnlock(): Promise<number | null> {
   try {
     const stored = await AsyncStorage.getItem(ADMIN_UNLOCK_KEY);
     if (!stored) return null;
     const unlockedAtMs = parseInt(stored, 10);
     if (isNaN(unlockedAtMs)) return null;
-    
-    // Check if session is still valid
-    const nowMs = Date.now();
-    if (nowMs - unlockedAtMs > sessionTtlMs) {
-      // Session expired, clear it
-      await AsyncStorage.removeItem(ADMIN_UNLOCK_KEY);
-      return null;
-    }
-    
     return unlockedAtMs;
   } catch (error) {
     console.error('Error loading persisted admin unlock:', error);
@@ -79,14 +68,12 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   lockUntilMs: null,
   lastFailureAtMs: null,
 
-  sessionTtlMs: 15 * 60 * 1000,
   maxAttemptsBeforeLock: 5,
   baseLockMs: 60 * 1000,
 
-  isUnlocked: (nowMs = now()) => {
-    const { unlockedAtMs, sessionTtlMs } = get();
-    if (!unlockedAtMs) return false;
-    return nowMs - unlockedAtMs <= sessionTtlMs;
+  isUnlocked: () => {
+    const { unlockedAtMs } = get();
+    return !!unlockedAtMs;
   },
 
   canAttempt: (nowMs = now()) => {
@@ -145,8 +132,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   },
 
   initialize: async () => {
-    const { sessionTtlMs } = get();
-    const unlockedAtMs = await loadPersistedUnlock(sessionTtlMs);
+    const unlockedAtMs = await loadPersistedUnlock();
     if (unlockedAtMs !== null) {
       set({ unlockedAtMs });
     }

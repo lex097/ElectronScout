@@ -4,6 +4,7 @@ import { useAdminStore } from '@/stores/adminStore';
 import { useAuthStore } from '@/stores/authStore';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { format } from 'date-fns';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -49,8 +50,7 @@ export function AdminPanel() {
     return Number.isFinite(num) ? num : null;
   }, [user?.teamNumber]);
 
-  // Removed AppState lock - admin session now persists across app backgrounding
-  // Session will still expire based on sessionTtlMs (15 minutes)
+  // Admin session persists until user taps Lock (no time-based expiry)
 
   useEffect(() => {
     if (!toast) return;
@@ -227,6 +227,13 @@ export function AdminPanel() {
           <FontAwesome name="refresh" size={16} color="#ff6600" />
           <Text style={styles.resetButtonText}>Reset Admin Code</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.resetButton}
+          onPress={() => router.push('/scouter-schedules' as any)}
+        >
+          <FontAwesome name="calendar" size={16} color="#ff6600" />
+          <Text style={styles.resetButtonText}>View/Edit Scouter Schedules</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -336,6 +343,8 @@ const styles = StyleSheet.create({
   },
   actionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'flex-start',
     marginBottom: 12,
   },

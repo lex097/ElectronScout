@@ -2,6 +2,43 @@
 // Change this file each year - nothing else needs to change!
 
 export type MetricType = 'counter' | 'boolean' | 'select' | 'timer' | 'rapidCounter';
+export type SurveyQuestionType = 'rating' | 'multipleChoice' | 'singleChoice' | 'text';
+
+/** Rating: 1–5 scale. Only label needed (e.g. "Defense", "Driving ability"). */
+export interface SurveyQuestionRating {
+  id: string;
+  type: 'rating';
+  label: string;
+}
+
+/** Multiple choice: user selects multiple options. */
+export interface SurveyQuestionMultipleChoice {
+  id: string;
+  type: 'multipleChoice';
+  label: string;
+  options: string[];
+}
+
+/** Single choice: user selects one option. */
+export interface SurveyQuestionSingleChoice {
+  id: string;
+  type: 'singleChoice';
+  label: string;
+  options: string[];
+}
+
+/** Text: free-form input (e.g. notes). */
+export interface SurveyQuestionText {
+  id: string;
+  type: 'text';
+  label: string;
+}
+
+export type SurveyQuestion =
+  | SurveyQuestionRating
+  | SurveyQuestionMultipleChoice
+  | SurveyQuestionSingleChoice
+  | SurveyQuestionText;
 
 export interface Metric {
   id: string;
@@ -28,6 +65,7 @@ export interface GameConfig {
   year: number;
   gameName: string;
   phases: GamePhase[];
+  survey: SurveyQuestion[];
 }
 
 // ============================================
@@ -225,7 +263,15 @@ export const GAME_2026: GameConfig = {
         },
       ]
     }
-  ]
+  ],
+  survey: [
+    { id: "role", type: "multipleChoice", label: "Role", options: ["Scoring", "Passing", "Defense", "Immobile"]},
+    { id: "defense", type: "rating", label: "Defense Played" },
+    { id: "driving", type: "rating", label: "Driving ability" },
+    { id: "accuracy", type: "rating", label: "Shot Accuracy"},
+    { id: "failures", type: "multipleChoice", label: "Failures?", options: ["Broke", "Immobile", "Disabled"]},
+    { id: "notes", type: "text", label: "Notes" },
+  ],
 };
 
 // Active config - change this to switch years
@@ -330,4 +376,16 @@ export const calculateMatchPoints = (metrics: Record<string, any>, config: GameC
   
     return totalPoints;
   };
+
+// Helper to get initial survey data structure
+export const getInitialSurveyData = (config: GameConfig = ACTIVE_GAME_CONFIG): Record<string, any> => {
+  const data: Record<string, any> = {};
+  config.survey.forEach((q) => {
+    if (q.type === 'rating') data[q.id] = null;
+    else if (q.type === 'singleChoice') data[q.id] = null;
+    else if (q.type === 'multipleChoice') data[q.id] = [];
+    else if (q.type === 'text') data[q.id] = '';
+  });
+  return data;
+};
 

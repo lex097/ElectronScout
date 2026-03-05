@@ -133,6 +133,9 @@ function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => voi
             <Stack.Screen name="select-event" options={{ gestureEnabled: true }} />
             <Stack.Screen name="select-match" options={{ gestureEnabled: true }} />
           <Stack.Screen name="select-team" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="my-schedule" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="scouter-schedules" options={{ gestureEnabled: true }} />
+          <Stack.Screen name="scouter-schedule-edit" options={{ gestureEnabled: true }} />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="(admin)" />
         </Stack>

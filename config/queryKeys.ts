@@ -55,4 +55,18 @@ export const queryKeys = {
 
   /** Event rankings from TBA API (for picklists) */
   rankings: (eventKey: string) => ['rankings', eventKey] as const,
+
+  /** Scouter schedule assignments */
+  scouterAssignments: {
+    all: ['scouterAssignments'] as const,
+    byTeamAndEvent: (teamId: string, eventKey: string) =>
+      ['scouterAssignments', teamId, eventKey] as const,
+    teamScouters: (teamId: string) =>
+      ['scouterAssignments', 'scouters', teamId] as const,
+    forScouter: (teamId: string, eventKey: string, scoutName: string) =>
+      ['scouterAssignments', 'mySchedule', teamId, eventKey, scoutName] as const,
+  },
+
+  /** Team context (admin - teamId from teamNumber) */
+  teamContext: (teamNumber: number) => ['teamContext', teamNumber] as const,
 } as const;

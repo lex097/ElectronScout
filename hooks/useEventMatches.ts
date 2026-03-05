@@ -8,9 +8,13 @@ import { matchesCacheService } from '../services/matchesCacheService';
  * React Query hook to fetch matches for a given event
  * Persists to AsyncStorage; new event overwrites previous. Hydrated on app init.
  * @param eventKey - The event key (e.g., "2025mndu") or null to disable query
+ * @param options - Optional overrides (e.g. staleTime)
  * @returns Query result with matches data, loading state, and error
  */
-export function useEventMatches(eventKey: string | null) {
+export function useEventMatches(
+  eventKey: string | null,
+  options?: { staleTime?: number }
+) {
   return useQuery<TBAMatch[], Error>({
     queryKey: queryKeys.matches.byEvent(eventKey ?? ''),
     queryFn: () => {
@@ -20,7 +24,7 @@ export function useEventMatches(eventKey: string | null) {
       return matchesCacheService.fetchAndCache(eventKey);
     },
     enabled: !!eventKey,
-    staleTime: 1 * 60 * 1000, // 1 minute
+    staleTime: options?.staleTime ?? 1 * 60 * 1000, // default 1 minute
   });
 }
 
