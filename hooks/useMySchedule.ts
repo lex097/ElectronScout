@@ -6,7 +6,7 @@ import { supabaseSyncService } from '@/services/supabase.sync';
 import { db } from '@/services/database';
 import { queryKeys } from '@/config/queryKeys';
 
-const STALE_TIME_MS = 10_000; // 10 seconds
+const STALE_TIME_MS = 0; // Always refetch when invalidated or on focus
 
 export type AssignmentRow = {
   match_key: string;

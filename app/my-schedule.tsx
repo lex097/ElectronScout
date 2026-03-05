@@ -45,10 +45,16 @@ export default function MyScheduleScreen() {
     setScoutName(name);
   }, [getScoutName]);
 
-  useFocusEffect(useCallback(() => void loadEventFromStorage(), [loadEventFromStorage]));
+  useFocusEffect(
+    useCallback(() => {
+      loadEventFromStorage();
+      // Refetch scouted status when screen comes into focus (e.g. after scouting a match)
+      refetch();
+    }, [loadEventFromStorage, refetch])
+  );
 
   const teamNumber = parseInt(user?.teamNumber || '0', 10);
-  const { data, isLoading } = useMySchedule(
+  const { data, isLoading, refetch } = useMySchedule(
     teamNumber && Number.isFinite(teamNumber) ? teamNumber : null,
     eventKey,
     scoutName

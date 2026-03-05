@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -23,7 +24,10 @@ import { ACTIVE_GAME_CONFIG, calculateMatchPoints, GameConfig } from '../../conf
 import { analyticsService, TeamAnalytics } from '../../services/analyticsService';
 import { db } from '../../services/database';
 import { exportService } from '../../services/exportService';
+import { chunkMatchesForQR } from '../../services/qrCodeService';
 import { syncManager } from '../../services/syncTransformer';
+import { useAdminStore } from '../../stores/adminStore';
+import { useQrCodeStore } from '../../stores/qrCodeStore';
 import { MatchData } from '../../types/match';
 import { useAnalyticsTeam } from '../../hooks/useAnalytics';
 import { queryKeys } from '../../config/queryKeys';
@@ -46,6 +50,10 @@ export default function AnalyticsScreen() {
   const [dataSource, setDataSource] = useState<DataSource>('local');
   const [surveyMatchForModal, setSurveyMatchForModal] = useState<MatchData | null>(null);
   const [surveyModalVisible, setSurveyModalVisible] = useState(false); // Keeps modal mounted during exit animation
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(new Set());
+  const setQrChunks = useQrCodeStore((s) => s.setChunks);
+  const isAdminUnlocked = useAdminStore((s) => s.isUnlocked());
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const contentTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
@@ -111,6 +119,47 @@ export default function AnalyticsScreen() {
   const isLoading = dataSource === 'local' ? false : teamQuery.isLoading;
   const isFetching = dataSource === 'local' ? false : teamQuery.isFetching;
   const refetch = dataSource === 'local' ? loadLocalData : teamQuery.refetch;
+
+  // QR modal: init all matches selected when opening
+  useEffect(() => {
+    if (showQrModal && matches.length > 0) {
+      setSelectedMatchIds(new Set(matches.map((m) => m.id)));
+    }
+  }, [showQrModal, matches]);
+
+  const toggleMatchSelection = useCallback((matchId: string) => {
+    setSelectedMatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(matchId)) next.delete(matchId);
+      else next.add(matchId);
+      return next;
+    });
+  }, []);
+
+  const selectAllMatches = useCallback(() => {
+    setSelectedMatchIds(new Set(matches.map((m) => m.id)));
+  }, [matches]);
+
+  const handleOpenQrModal = useCallback(() => {
+    if (matches.length === 0) {
+      Alert.alert('No Data', 'No matches to share via QR code.');
+      return;
+    }
+    setShowQrModal(true);
+  }, [matches.length]);
+
+  const handleGenerateQrCodes = useCallback(async () => {
+    const selected = matches.filter((m) => selectedMatchIds.has(m.id));
+    if (selected.length === 0) {
+      Alert.alert('Select Matches', 'Please select at least one match to include.');
+      return;
+    }
+    const evtKey = dataSource === 'team' ? eventKey : await AsyncStorage.getItem('selected_event_key');
+    const chunks = chunkMatchesForQR(selected, evtKey || null);
+    setQrChunks(chunks);
+    setShowQrModal(false);
+    router.push('/qr-codes' as any);
+  }, [matches, selectedMatchIds, dataSource, eventKey, setQrChunks]);
 
   const handleClearData = () => {
     Alert.alert(
@@ -987,23 +1036,36 @@ export default function AnalyticsScreen() {
           )}
         </View>
 
-        {/* Export Button - Only show in Team Data section */}
-        {dataSource === 'team' && teamMatches.length > 0 && (
-          <View style={styles.exportContainer}>
+        {/* Scan QR Codes - Only in My Data, only for admins */}
+        {dataSource === 'local' && isAdminUnlocked && (
+          <View style={styles.scanQrContainer}>
             <TouchableOpacity
-              style={[styles.exportButton, isExporting && styles.exportButtonDisabled]}
+              style={styles.scanQrButton}
+              onPress={() => router.push('/scan-qr' as any)}
+            >
+              <Ionicons name="scan-outline" size={20} color="white" />
+              <Text style={styles.scanQrButtonText}>Scan QR Codes</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Export Button - Only in Team Data, above cards */}
+        {dataSource === 'team' && teamMatches.length > 0 && (
+          <View style={styles.scanQrContainer}>
+            <TouchableOpacity
+              style={[styles.scanQrButton, isExporting && styles.syncButtonDisabled]}
               onPress={handleExport}
               disabled={isExporting}
             >
               {isExporting ? (
                 <>
                   <ActivityIndicator size="small" color="white" />
-                  <Text style={styles.exportButtonText}>Exporting...</Text>
+                  <Text style={styles.scanQrButtonText}>Exporting...</Text>
                 </>
               ) : (
                 <>
                   <Ionicons name="download-outline" size={20} color="white" />
-                  <Text style={styles.exportButtonText}>Export Data</Text>
+                  <Text style={styles.scanQrButtonText}>Export Data</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -1134,6 +1196,15 @@ export default function AnalyticsScreen() {
               )}
               <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
             </TouchableOpacity>
+            {localMatches.length > 0 && (
+              <TouchableOpacity
+                style={styles.syncButton}
+                onPress={handleOpenQrModal}
+              >
+                <Ionicons name="qr-code-outline" size={20} color="white" />
+                <Text style={styles.syncButtonText}>Generate QR Codes</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>
@@ -1203,6 +1274,74 @@ export default function AnalyticsScreen() {
             </View>
           </Animated.View>
         </View>
+      </Modal>
+
+      {/* QR Code Match Selection Modal */}
+      <Modal
+        visible={showQrModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQrModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.qrModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowQrModal(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={styles.qrModalContent}
+          >
+            <Text style={styles.qrModalTitle}>Matches to include</Text>
+            <Text style={styles.qrModalSubtitle}>
+              Up to 15 matches per QR code. Select matches to share.
+            </Text>
+            <TouchableOpacity style={styles.qrModalSelectAll} onPress={selectAllMatches}>
+              <Text style={styles.qrModalSelectAllText}>Select All</Text>
+            </TouchableOpacity>
+            <ScrollView style={styles.qrModalScroll} showsVerticalScrollIndicator>
+              {[...matches]
+                .sort((a, b) => a.matchNumber - b.matchNumber || a.teamNumber - b.teamNumber)
+                .map((match) => (
+                  <TouchableOpacity
+                    key={match.id}
+                    style={styles.qrModalRow}
+                    onPress={() => toggleMatchSelection(match.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.qrModalCheckbox,
+                        selectedMatchIds.has(match.id) && styles.qrModalCheckboxChecked,
+                      ]}
+                    >
+                      {selectedMatchIds.has(match.id) && (
+                        <Text style={styles.qrModalCheck}>✓</Text>
+                      )}
+                    </View>
+                    <Text style={styles.qrModalMatchText}>
+                      Match {match.matchNumber} • Team {match.teamNumber}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+            </ScrollView>
+            <View style={styles.qrModalActions}>
+              <TouchableOpacity
+                style={styles.qrModalCancelButton}
+                onPress={() => setShowQrModal(false)}
+              >
+                <Text style={styles.qrModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.qrModalGenerateButton}
+                onPress={handleGenerateQrCodes}
+              >
+                <Text style={styles.qrModalGenerateText}>Generate</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -1600,6 +1739,7 @@ const styles = {
   footer: {
     padding: 16,
     paddingBottom: 16,
+    gap: 12,
   },
   syncButton: {
     flexDirection: 'row' as const,
@@ -1618,11 +1758,11 @@ const styles = {
     fontSize: 16,
     fontWeight: '600' as const,
   },
-  exportContainer: {
+  scanQrContainer: {
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  exportButton: {
+  scanQrButton: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
@@ -1631,11 +1771,106 @@ const styles = {
     borderRadius: 10,
     gap: 8,
   },
-  exportButtonDisabled: {
-    opacity: 0.7,
-  },
-  exportButtonText: {
+  scanQrButtonText: {
     color: 'white',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  qrModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    padding: 24,
+  },
+  qrModalContent: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 20,
+    width: 360,
+    maxWidth: 360,
+    maxHeight: 400,
+  },
+  qrModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold' as const,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  qrModalSubtitle: {
+    fontSize: 13,
+    color: '#b0b0b0',
+    marginBottom: 12,
+  },
+  qrModalSelectAll: {
+    alignSelf: 'flex-start' as const,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    marginBottom: 12,
+  },
+  qrModalSelectAllText: {
+    color: '#ff6600',
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  qrModalScroll: {
+    maxHeight: 280,
+    marginBottom: 16,
+  },
+  qrModalRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#404040',
+  },
+  qrModalCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#666',
+    marginRight: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  qrModalCheckboxChecked: {
+    backgroundColor: '#ff6600',
+    borderColor: '#ff6600',
+  },
+  qrModalCheck: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold' as const,
+  },
+  qrModalMatchText: {
+    fontSize: 16,
+    color: '#fff',
+  },
+  qrModalActions: {
+    flexDirection: 'row' as const,
+    gap: 12,
+    justifyContent: 'flex-end' as const,
+  },
+  qrModalCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  qrModalCancelText: {
+    color: '#b0b0b0',
+    fontSize: 16,
+  },
+  qrModalGenerateButton: {
+    backgroundColor: '#ff6600',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center' as const,
+  },
+  qrModalGenerateText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600' as const,
   },

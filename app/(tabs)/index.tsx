@@ -690,6 +690,20 @@ export default function MatchScoutScreen() {
         await db.saveMatch(matchData);
         await syncManager.uploadMatch(matchData);
         await earnEbucks(EARNED_PER_MATCH, `Scouted match ${matchNumber} for team ${teamNumber}`);
+
+        // Optimistically update My Schedule cache so "Scouted" badge appears instantly
+        const myTeamNumber = useAuthStore.getState().user?.teamNumber;
+        const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
+        if (myTeamNumber && eventKey && scoutName) {
+          const qk = queryKeys.scouterAssignments.forScouter(myTeamNumber, eventKey, scoutName);
+          queryClient.setQueryData(qk, (old: { assignments: any[]; scoutedSet: Set<string> } | undefined) => {
+            if (!old) return old;
+            const key = `${matchData.matchNumber}:${matchData.teamNumber}`;
+            const newSet = new Set(old.scoutedSet);
+            newSet.add(key);
+            return { ...old, scoutedSet: newSet };
+          });
+        }
         if (isTBAMode) {
           try {
             const matchKey = await AsyncStorage.getItem(SELECTED_MATCH_KEY);
@@ -714,29 +728,20 @@ export default function MatchScoutScreen() {
           `Match ${matchNumber} for team ${teamNumber} saved! You earned ${EARNED_PER_MATCH} ebucks!`,
           [
             {
-              text: 'New Match',
+              text: 'Done',
               onPress: async () => {
                 resetMatchAndTimerState();
-                if (isTBAMode) {
-                  await AsyncStorage.multiRemove([
-                    SELECTED_MATCH_KEY,
-                    SELECTED_MATCH_NUMBER_KEY,
-                    SELECTED_TEAM_NUMBER_KEY,
-                    SELECTED_ALLIANCE_KEY,
-                  ]);
-                  const eventKey = await AsyncStorage.getItem(SELECTED_EVENT_KEY);
-                  if (eventKey) {
-                    router.push({
-                      pathname: '/select-match' as any,
-                      params: { eventKey },
-                    });
-                  } else {
-                    router.push('/select-event' as any);
-                  }
-                } else {
-                  setMatchNumber(String((parseInt(matchNumber, 10) || 0) + 1));
-                  setTeamNumber('');
-                }
+                await AsyncStorage.multiRemove([
+                  SELECTED_MATCH_KEY,
+                  SELECTED_MATCH_NUMBER_KEY,
+                  SELECTED_TEAM_NUMBER_KEY,
+                  SELECTED_ALLIANCE_KEY,
+                ]);
+                setMatchNumber('');
+                setTeamNumber('');
+                setAllianceColor(null);
+                matchNumberRef.current = '';
+                teamNumberRef.current = '';
                 setMetrics(getInitialMatchData());
                 setCurrentPhaseIndex(0);
               },

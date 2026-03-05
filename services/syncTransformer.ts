@@ -57,7 +57,7 @@ export class SyncTransformer {
   static validateMatch(match: any): boolean {
     if (!match.id) return false;
     if (!match.match_number || match.match_number < 1) return false;
-    if (!match.team_number || match.team_number < 1 || match.team_number > 9999) return false;
+    if (!match.team_number || match.team_number < 1 || match.team_number > 99999) return false;
     if (!match.game_year || match.game_year < 2000) return false;
     if (!match.metrics || typeof match.metrics !== 'object') return false;
     if (typeof match.calculated_points !== 'number' || match.calculated_points < 0) return false;

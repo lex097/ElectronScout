@@ -50,7 +50,13 @@ export default {
     },
     plugins: [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan QR codes"
+        }
+      ]
     ],
     experiments: {
       typedRoutes: true
