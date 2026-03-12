@@ -13,6 +13,7 @@ import { UpdateAppModal } from '@/components/UpdateAppModal';
 import { useColorScheme } from '@/components/useColorScheme';
 import { queryClient } from '@/config/queryClient';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
+import { useAdminStore } from '@/stores/adminStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useDemoStore } from '@/stores/demoStore';
 import { useEbucksStore } from '@/stores/ebucksStore';
@@ -70,6 +71,7 @@ export default Sentry.wrap(function RootLayout() {
 function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => void }) {
   const colorScheme = useColorScheme();
   const { isAuthenticated, user, isLoading, checkAuth } = useAuthStore();
+  const initializeAdmin = useAdminStore((state) => state.initialize);
   const initializeEbucks = useEbucksStore((state) => state.initialize);
   const initializeDemo = useDemoStore((state) => state.initialize);
   const { showModal, storeUrl, latestVersion, dismissModal } = useVersionCheck();
@@ -77,7 +79,8 @@ function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => voi
   useEffect(() => {
     checkAuth();
     initializeDemo();
-  }, [checkAuth, initializeDemo]);
+    initializeAdmin();
+  }, [checkAuth, initializeDemo, initializeAdmin]);
 
   // Hide splash only when auth check is complete (avoids black flash between splash and first screen)
   useEffect(() => {

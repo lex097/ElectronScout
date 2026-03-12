@@ -32,6 +32,7 @@ import { MatchData } from '../../types/match';
 import { useAnalyticsTeam } from '../../hooks/useAnalytics';
 import { queryKeys } from '../../config/queryKeys';
 import { supabaseSyncService } from '../../services/supabase.sync';
+import { useCameraPermissions } from 'expo-camera';
 
 type SortField = 'avgScore' | 'avgAuto' | 'avgTeleop' | 'avgEndgame';
 type SortDirection = 'asc' | 'desc';
@@ -54,6 +55,7 @@ export default function AnalyticsScreen() {
   const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(new Set());
   const setQrChunks = useQrCodeStore((s) => s.setChunks);
   const isAdminUnlocked = useAdminStore((s) => s.isUnlocked());
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const contentTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
@@ -1041,7 +1043,16 @@ export default function AnalyticsScreen() {
           <View style={styles.scanQrContainer}>
             <TouchableOpacity
               style={styles.scanQrButton}
-              onPress={() => router.push('/scan-qr' as any)}
+              onPress={async () => {
+                if (cameraPermission?.granted) {
+                  router.push('/scan-qr' as any);
+                  return;
+                }
+                const result = await requestCameraPermission?.();
+                if (result?.granted) {
+                  router.push('/scan-qr' as any);
+                }
+              }}
             >
               <Ionicons name="scan-outline" size={20} color="white" />
               <Text style={styles.scanQrButtonText}>Scan QR Codes</Text>
