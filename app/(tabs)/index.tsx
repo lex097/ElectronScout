@@ -21,6 +21,7 @@ import { EARNED_PER_MATCH, useEbucksStore } from '../../stores/ebucksStore';
 import { MatchData } from '../../types/match';
 
 const TBA_MODE_KEY = 'tba_mode_enabled';
+const TRACKING_MODE_KEY = 'tracking_mode';
 const SELECTED_EVENT_KEY = 'selected_event_key';
 const SELECTED_EVENT_NAME_KEY = 'selected_event_name';
 const SELECTED_MATCH_KEY = 'selected_match_key';
@@ -48,6 +49,7 @@ export default function MatchScoutScreen() {
   const [showSurveyModal, setShowSurveyModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRapidCounterExpanded, setIsRapidCounterExpanded] = useState(false);
+  const [trackingMode, setTrackingMode] = useState<'rate' | 'static'>('rate');
   const [matchStarted, setMatchStarted] = useState(false);
   const [autonomousTimeRemaining, setAutonomousTimeRemaining] = useState<number | null>(null);
   const [showCountdownToast, setShowCountdownToast] = useState(false);
@@ -110,6 +112,11 @@ export default function MatchScoutScreen() {
         const tbaMode = await AsyncStorage.getItem(TBA_MODE_KEY);
         if (tbaMode !== null) {
           setIsTBAMode(tbaMode === 'true');
+        }
+
+        const savedTrackingMode = await AsyncStorage.getItem(TRACKING_MODE_KEY);
+        if (savedTrackingMode === 'rate' || savedTrackingMode === 'static') {
+          setTrackingMode(savedTrackingMode);
         }
 
         const eventName = await AsyncStorage.getItem(SELECTED_EVENT_NAME_KEY);
@@ -519,6 +526,42 @@ export default function MatchScoutScreen() {
         );
 
       case 'rapidCounter':
+        if (trackingMode === 'static') {
+          const clampedAdd = (delta: number) => {
+            const next = value + delta;
+            const clamped = Math.max(0, metric.max ? Math.min(next, metric.max) : next);
+            updateMetric(metric.id, clamped);
+          };
+          return (
+            <View key={metric.id} style={styles.metricContainer}>
+              <Text style={styles.metricLabel}>{metric.label}</Text>
+              <View style={styles.staticCounterRow}>
+                {([-10, -5, -1] as const).map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={styles.staticCounterBtn}
+                    onPress={() => clampedAdd(d)}
+                  >
+                    <Text style={styles.staticCounterBtnText}>{d}</Text>
+                  </TouchableOpacity>
+                ))}
+                <View style={styles.staticCounterValue}>
+                  <Text style={styles.counterValueText}>{value}</Text>
+                </View>
+                {([1, 5, 10] as const).map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.staticCounterBtn, styles.staticCounterBtnPos]}
+                    onPress={() => clampedAdd(d)}
+                  >
+                    <Text style={styles.staticCounterBtnText}>+{d}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {metric.max && <Text style={styles.maxLabel}>Max: {metric.max}</Text>}
+            </View>
+          );
+        }
         return (
           <RapidCounterInput
             key={metric.id}
@@ -527,8 +570,6 @@ export default function MatchScoutScreen() {
             onValueChange={(newValue) => updateMetric(metric.id, newValue)}
             onExpandedChange={setIsRapidCounterExpanded}
             onExpand={(pageY, height) => {
-              // pageY is the absolute screen position of the panel after expansion
-              // height is the expanded panel height (300)
               handleRapidCounterExpand(pageY, height);
             }}
           />
@@ -1020,6 +1061,27 @@ export default function MatchScoutScreen() {
             </View>
           </View>
         )}
+
+        {/* Tracking Mode Chooser */}
+        <View style={styles.trackingModeSection}>
+          <Text style={styles.inputLabel}>Tracking</Text>
+          <View style={styles.trackingModeRow}>
+            {(['rate', 'static'] as const).map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.trackingModeBtn, trackingMode === mode && styles.trackingModeBtnActive]}
+                onPress={() => {
+                  setTrackingMode(mode);
+                  AsyncStorage.setItem(TRACKING_MODE_KEY, mode);
+                }}
+              >
+                <Text style={[styles.trackingModeBtnText, trackingMode === mode && styles.trackingModeBtnTextActive]}>
+                  {mode === 'rate' ? 'Rate' : 'Static'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* Phase Tabs */}
         <View style={styles.phaseTabs}>
@@ -1522,5 +1584,71 @@ const styles = {
     fontWeight: 'bold' as const,
     color: 'white',
     textAlign: 'center' as const,
+  },
+  // Tracking mode chooser
+  trackingModeSection: {
+    marginBottom: 16,
+  },
+  trackingModeRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+  trackingModeBtn: {
+    flex: 1,
+    backgroundColor: '#2a2a2a',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    borderWidth: 2,
+    borderColor: '#404040',
+  },
+  trackingModeBtnActive: {
+    backgroundColor: '#2a2a2a',
+    borderColor: '#ff6600',
+  },
+  trackingModeBtnText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#b0b0b0',
+  },
+  trackingModeBtnTextActive: {
+    color: '#ff6600',
+  },
+  // Static counter (replaces RapidCounter in static tracking mode)
+  staticCounterRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  staticCounterBtn: {
+    flex: 1,
+    backgroundColor: '#3a2a2a',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    borderWidth: 1,
+    borderColor: '#5a3030',
+  },
+  staticCounterBtnPos: {
+    backgroundColor: '#2a3a2a',
+    borderColor: '#305a30',
+  },
+  staticCounterBtnText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#e5e5e5',
+  },
+  staticCounterValue: {
+    flex: 1.2,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    borderWidth: 1,
+    borderColor: '#404040',
   },
 };

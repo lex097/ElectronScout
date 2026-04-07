@@ -51,6 +51,10 @@ export const queryKeys = {
     all: ['analytics'] as const,
     local: () => ['analytics', 'local'] as const,
     team: (eventKey: string) => ['analytics', 'team', eventKey] as const,
+    crossTeam: (eventKey: string, visibility: string) =>
+      ['analytics', 'cross', eventKey, visibility] as const,
+    lookup: (teamNumber: number, eventKey: string | null, visibility: string) =>
+      ['analytics', 'lookup', teamNumber, eventKey, visibility] as const,
   },
 
   /** Event rankings from TBA API (for picklists) */

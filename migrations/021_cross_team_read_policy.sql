@@ -1,0 +1,15 @@
+-- Cross-team read access via SECURITY DEFINER RPC functions.
+--
+-- The teams table RLS restricts reads to own team only, which would break
+-- JOIN queries needed for cross-team analytics. Rather than broadening the
+-- teams RLS, we expose two SECURITY DEFINER functions that run the join
+-- server-side and return only the fields the app needs.
+--
+-- Applied via Supabase MCP as migration "cross_team_rpc_functions".
+-- See supabase/functions or migrations applied in dashboard for the DDL.
+--
+-- Functions created:
+--   get_event_matches_cross_team(p_event_key text)
+--   get_team_number_matches_cross_team(p_team_number int, p_event_key text)
+--
+-- Both are GRANTed to the `authenticated` role only.

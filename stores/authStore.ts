@@ -9,6 +9,7 @@ import { useAdminStore } from '@/stores/adminStore';
 const SCOUT_NAME_KEY = 'scout_name';
 const TEAM_NUMBER_KEY = 'team_number';
 const TEAM_ID_KEY = 'team_id';
+const TEAM_CODE_KEY = 'team_code';
 const ACCESS_TOKEN_KEY = 'auth_access_token';
 const REFRESH_TOKEN_KEY = 'auth_refresh_token';
 const TOKEN_EXPIRES_AT_KEY = 'auth_token_expires_at';
@@ -97,6 +98,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       await AsyncStorage.setItem(SCOUT_NAME_KEY, scoutName);
       await AsyncStorage.setItem(TEAM_NUMBER_KEY, String(user.team_number));
       await AsyncStorage.setItem(TEAM_ID_KEY, user.team_id);
+      await AsyncStorage.setItem(TEAM_CODE_KEY, teamCode);
 
       set({
         user: {
@@ -111,7 +113,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     logout: async () => {
       await AsyncStorage.multiRemove([
-        SCOUT_NAME_KEY, TEAM_NUMBER_KEY, TEAM_ID_KEY,
+        SCOUT_NAME_KEY, TEAM_NUMBER_KEY, TEAM_ID_KEY, TEAM_CODE_KEY,
         ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY,
       ]);
       useAdminStore.getState().lock();

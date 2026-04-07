@@ -70,6 +70,12 @@ export class AdminService {
     };
   }
 
+  async getAdminCode(teamId: string): Promise<string | null> {
+    const { data, error } = await supabase.from('teams').select('admin_code').eq('id', teamId).single();
+    if (error || !data) return null;
+    return data.admin_code ? String(data.admin_code) : null;
+  }
+
   async verifyAdminCode(teamId: string, code: string): Promise<boolean> {
     const { data, error } = await supabase.from('teams').select('admin_code').eq('id', teamId).single();
 

@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
+import { Pressable } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
@@ -15,6 +16,7 @@ import { queryClient } from '@/config/queryClient';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
 import { useAdminStore } from '@/stores/adminStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useDataVisibilityStore } from '@/stores/dataVisibilityStore';
 import { useDemoStore } from '@/stores/demoStore';
 import { useEbucksStore } from '@/stores/ebucksStore';
 import * as Sentry from '@sentry/react-native';
@@ -74,13 +76,15 @@ function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => voi
   const initializeAdmin = useAdminStore((state) => state.initialize);
   const initializeEbucks = useEbucksStore((state) => state.initialize);
   const initializeDemo = useDemoStore((state) => state.initialize);
+  const loadVisibility = useDataVisibilityStore((state) => state.loadVisibility);
   const { showModal, storeUrl, latestVersion, dismissModal } = useVersionCheck();
 
   useEffect(() => {
     checkAuth();
     initializeDemo();
     initializeAdmin();
-  }, [checkAuth, initializeDemo, initializeAdmin]);
+    loadVisibility();
+  }, [checkAuth, initializeDemo, initializeAdmin, loadVisibility]);
 
   // Hide splash only when auth check is complete (avoids black flash between splash and first screen)
   useEffect(() => {
@@ -141,6 +145,25 @@ function RootLayoutNav({ onReadyToHideSplash }: { onReadyToHideSplash: () => voi
           <Stack.Screen name="scouter-schedule-edit" options={{ gestureEnabled: true }} />
           <Stack.Screen name="qr-codes" options={{ gestureEnabled: true }} />
           <Stack.Screen name="scan-qr" options={{ gestureEnabled: true }} />
+          <Stack.Screen
+            name="settings"
+            options={{
+              gestureEnabled: true,
+              headerShown: true,
+              headerStyle: { backgroundColor: '#1a1a1a' },
+              headerTintColor: '#fff',
+              headerTitle: 'Settings',
+              headerLeft: () => (
+                <Pressable
+                  onPress={() => router.back()}
+                  style={{ marginLeft: 8, padding: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <FontAwesome name="chevron-left" size={18} color="#fff" />
+                </Pressable>
+              ),
+            }}
+          />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="(admin)" />
         </Stack>

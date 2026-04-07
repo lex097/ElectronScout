@@ -2,6 +2,33 @@
 import { edgeFunctions } from '@/lib/edgeFunctions';
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MatchData } from '@/types/match';
+
+/** A match record that includes which team did the scouting */
+export interface CrossTeamMatch extends MatchData {
+  scoutingTeamNumber: number;
+  eventKey?: string;
+}
+
+function mapCrossTeamRow(row: any): CrossTeamMatch {
+  return {
+    id: row.id,
+    matchNumber: row.match_number,
+    teamNumber: row.team_number,
+    scouterId: row.scout_name ?? '',
+    gameYear: row.game_year ?? 0,
+    metrics: row.metrics ?? {},
+    // RPC returns match_timestamp (renamed to avoid reserved-word conflict)
+    timestamp: row.match_timestamp ?? row.timestamp ?? 0,
+    synced: true,
+    notes: row.notes ?? undefined,
+    survey: row.survey ?? undefined,
+    allianceColor: row.alliance as 'red' | 'blue' | undefined,
+    // RPC returns flat scouting_team_number (no nested teams object)
+    scoutingTeamNumber: row.scouting_team_number ?? 0,
+    eventKey: row.event_key ?? undefined,
+  };
+}
 
 // ============================================
 // SYNC SERVICE
@@ -252,6 +279,54 @@ export class SupabaseSyncService {
       return result.matches || [];
     } catch (error) {
       console.error('Fetch failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all matches for a given event_key across ALL scouting teams.
+   * Uses a SECURITY DEFINER RPC to bypass the teams table RLS restriction
+   * that would otherwise limit the JOIN to the current team only.
+   * Used for 'teams_at_event' visibility scope.
+   */
+  async getEventMatches(eventKey: string): Promise<CrossTeamMatch[]> {
+    try {
+      const { data, error } = await supabase
+        .rpc('get_event_matches_cross_team', { p_event_key: eventKey });
+
+      if (error) {
+        console.error('Failed to fetch event matches:', error);
+        return [];
+      }
+
+      return (data || []).map((row: any) => mapCrossTeamRow(row));
+    } catch (error) {
+      console.error('getEventMatches error:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all matches for a specific scouted team_number regardless of who scouted them.
+   * Optionally filter by event_key. Used for 'all_teams' scope and Team Lookup.
+   * Uses a SECURITY DEFINER RPC to bypass the teams table RLS restriction.
+   */
+  async getMatchesForTeamNumber(teamNumber: number, eventKey?: string): Promise<CrossTeamMatch[]> {
+    try {
+      const { data, error } = await supabase
+        .rpc('get_team_number_matches_cross_team', {
+          p_team_number: teamNumber,
+          p_event_key: eventKey ?? null,
+        });
+
+      if (error) {
+        console.error('Failed to fetch matches for team number:', error);
+        return [];
+      }
+
+      return (data || []).map((row: any) => mapCrossTeamRow(row));
+    } catch (error) {
+      console.error('getMatchesForTeamNumber error:', error);
       return [];
     }
   }

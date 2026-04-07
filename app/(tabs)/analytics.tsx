@@ -15,6 +15,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -28,16 +29,88 @@ import { chunkMatchesForQR } from '../../services/qrCodeService';
 import { syncManager } from '../../services/syncTransformer';
 import { useAdminStore } from '../../stores/adminStore';
 import { useQrCodeStore } from '../../stores/qrCodeStore';
+import { useDataVisibilityStore } from '../../stores/dataVisibilityStore';
 import { MatchData } from '../../types/match';
-import { useAnalyticsTeam } from '../../hooks/useAnalytics';
+import { useAnalyticsCrossTeam, useTeamLookup } from '../../hooks/useAnalytics';
+import { CrossTeamMatch } from '../../services/supabase.sync';
 import { queryKeys } from '../../config/queryKeys';
 import { supabaseSyncService } from '../../services/supabase.sync';
 import { useCameraPermissions } from 'expo-camera';
 
 type SortField = 'avgScore' | 'avgAuto' | 'avgTeleop' | 'avgEndgame';
 type SortDirection = 'asc' | 'desc';
-type DataSource = 'local' | 'team';
+type DataSource = 'local' | 'team' | 'lookup';
 type AllianceFilter = 'overall' | 'red' | 'blue';
+type ScouterFilter = 'my_team' | 'all_teams';
+
+// ─── Team Lookup Tab ────────────────────────────────────────────────────────
+// Isolated component so typing in the search box only re-renders this section.
+function TeamLookupTab({
+  eventKey,
+  visibility,
+  myTeamNumber,
+  renderTeamCard,
+}: {
+  eventKey: string | null;
+  visibility: import('../../stores/dataVisibilityStore').DataVisibility;
+  myTeamNumber: number | null;
+  renderTeamCard: (team: TeamAnalytics) => React.ReactNode;
+}) {
+  const [input, setInput] = useState('');
+  const [teamNumber, setTeamNumber] = useState<number | null>(null);
+  const query = useTeamLookup(teamNumber, eventKey, visibility);
+  const analytics = query.data?.teamAnalytics ?? new Map<number, TeamAnalytics>();
+  const team = teamNumber ? analytics.get(teamNumber) : null;
+
+  return (
+    <View style={{ flex: 1 }}>
+      <TextInput
+        style={styles.lookupInput}
+        placeholder="Enter team number…"
+        placeholderTextColor="#666"
+        keyboardType="number-pad"
+        value={input}
+        onChangeText={(text) => {
+          setInput(text);
+          const n = parseInt(text, 10);
+          setTeamNumber(!isNaN(n) && n > 0 ? n : null);
+        }}
+        returnKeyType="done"
+      />
+      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+        {query.isLoading && teamNumber && (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color="#ff6600" />
+          </View>
+        )}
+        {!query.isLoading && teamNumber && !team && (
+          <View style={styles.emptyState}>
+            <Ionicons name="alert-circle-outline" size={64} color="#9ca3af" />
+            <Text style={styles.emptyTitle}>No Data Found</Text>
+            <Text style={styles.emptySubtitle}>
+              No data found for Team {teamNumber} with the current scope
+            </Text>
+          </View>
+        )}
+        {!teamNumber && (
+          <View style={styles.emptyState}>
+            <Ionicons name="search-outline" size={64} color="#9ca3af" />
+            <Text style={styles.emptyTitle}>Team Lookup</Text>
+            <Text style={styles.emptySubtitle}>
+              Enter a team number to search for their scouting data
+            </Text>
+          </View>
+        )}
+        {team && (
+          <View style={styles.teamList}>
+            {renderTeamCard(team)}
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 export default function AnalyticsScreen() {
   const queryClient = useQueryClient();
@@ -55,6 +128,7 @@ export default function AnalyticsScreen() {
   const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(new Set());
   const setQrChunks = useQrCodeStore((s) => s.setChunks);
   const isAdminUnlocked = useAdminStore((s) => s.isUnlocked());
+  const { visibility } = useDataVisibilityStore();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const contentTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
@@ -63,9 +137,34 @@ export default function AnalyticsScreen() {
   const [localMatches, setLocalMatches] = useState<MatchData[]>([]);
   const [localTeamAnalytics, setLocalTeamAnalytics] = useState<Map<number, TeamAnalytics>>(new Map());
 
-  const teamQuery = useAnalyticsTeam(eventKey);
-  const teamMatches = teamQuery.data?.matches ?? [];
-  const teamTeamAnalytics = teamQuery.data?.teamAnalytics ?? new Map<number, TeamAnalytics>();
+  // Scouter filter for cross-team Team Data tab
+  const [scouterFilter, setScouterFilter] = useState<ScouterFilter>('my_team');
+  const [myTeamNumber, setMyTeamNumber] = useState<number | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem('team_number').then((n) =>
+      n ? setMyTeamNumber(parseInt(n, 10)) : null
+    );
+  }, []);
+
+  // Queries
+  // Team Data tab always uses event-scoped cross-team data regardless of visibility setting
+  const crossTeamQuery = useAnalyticsCrossTeam(
+    dataSource === 'team' ? eventKey : null,
+    'teams_at_event'
+  );
+
+  // Cross-team data — always event-scoped
+  const rawCrossMatches = (crossTeamQuery.data?.matches ?? []) as CrossTeamMatch[];
+
+  // Apply scouter filter: my_team = only my scouting, all_teams = everyone at event
+  const crossMatches: CrossTeamMatch[] = scouterFilter === 'my_team'
+    ? rawCrossMatches.filter((m) => m.scoutingTeamNumber === myTeamNumber)
+    : rawCrossMatches;
+
+  const crossTeamAnalytics: Map<number, TeamAnalytics> = scouterFilter === 'my_team'
+    ? analyticsService.calculateTeamAnalytics(crossMatches)
+    : (crossTeamQuery.data?.teamAnalytics ?? new Map<number, TeamAnalytics>());
 
   // Survey modal: backdrop fades in (fixed), content slides up
   useEffect(() => {
@@ -116,11 +215,11 @@ export default function AnalyticsScreen() {
     }, [loadLocalData])
   );
 
-  const matches = dataSource === 'local' ? localMatches : teamMatches;
-  const teamAnalytics = dataSource === 'local' ? localTeamAnalytics : teamTeamAnalytics;
-  const isLoading = dataSource === 'local' ? false : teamQuery.isLoading;
-  const isFetching = dataSource === 'local' ? false : teamQuery.isFetching;
-  const refetch = dataSource === 'local' ? loadLocalData : teamQuery.refetch;
+  const matches = dataSource === 'local' ? localMatches : crossMatches;
+  const teamAnalytics = dataSource === 'local' ? localTeamAnalytics : crossTeamAnalytics;
+  const isLoading = dataSource === 'local' ? false : crossTeamQuery.isLoading;
+  const isFetching = dataSource === 'local' ? false : crossTeamQuery.isFetching;
+  const refetch = dataSource === 'local' ? loadLocalData : crossTeamQuery.refetch;
 
   // QR modal: init all matches selected when opening
   useEffect(() => {
@@ -156,7 +255,7 @@ export default function AnalyticsScreen() {
       Alert.alert('Select Matches', 'Please select at least one match to include.');
       return;
     }
-    const evtKey = dataSource === 'team' ? eventKey : await AsyncStorage.getItem('selected_event_key');
+    const evtKey = dataSource !== 'local' ? eventKey : await AsyncStorage.getItem('selected_event_key');
     const chunks = chunkMatchesForQR(selected, evtKey || null);
     setQrChunks(chunks);
     setShowQrModal(false);
@@ -286,6 +385,8 @@ export default function AnalyticsScreen() {
       await loadLocalData();
       if (eventKey) {
         queryClient.invalidateQueries({ queryKey: queryKeys.analytics.team(eventKey) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.analytics.crossTeam(eventKey, 'teams_at_event') });
+        queryClient.invalidateQueries({ queryKey: queryKeys.analytics.crossTeam(eventKey, 'all_teams') });
       }
 
       Alert.alert(
@@ -302,7 +403,7 @@ export default function AnalyticsScreen() {
 
   const handleExport = async () => {
     try {
-      if (teamMatches.length === 0) {
+      if (crossMatches.length === 0) {
         Alert.alert('No Data', 'No team data available to export.');
         return;
       }
@@ -635,12 +736,34 @@ export default function AnalyticsScreen() {
       <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
       <Text style={styles.emptyTitle}>No Data Yet</Text>
       <Text style={styles.emptySubtitle}>
-        {dataSource === 'local' 
+        {dataSource === 'local'
           ? 'Start scouting matches to see analytics here'
           : 'No team data available. Sync matches to see team analytics.'}
       </Text>
     </View>
   );
+
+  const isCrossTeamMode = dataSource === 'team' && visibility !== 'my_team';
+  const isLookupMode = dataSource === 'lookup';
+  const showScoutingTeam = isCrossTeamMode || isLookupMode;
+
+  // Group lookup matches by event_key for event summaries
+  const getLookupEventSummaries = (team: TeamAnalytics) => {
+    const byEvent = new Map<string, MatchData[]>();
+    team.matchHistory.forEach((m) => {
+      const key = (m as CrossTeamMatch).eventKey ?? 'unknown';
+      if (!byEvent.has(key)) byEvent.set(key, []);
+      byEvent.get(key)!.push(m);
+    });
+    return Array.from(byEvent.entries()).map(([eventKey, evMatches]) => {
+      const total = evMatches.reduce((s, m) => s + calculateMatchPoints(m.metrics), 0);
+      return {
+        eventKey,
+        matchCount: evMatches.length,
+        avgPoints: evMatches.length > 0 ? Math.round((total / evMatches.length) * 10) / 10 : 0,
+      };
+    });
+  };
 
   const renderTeamCard = (team: TeamAnalytics) => {
     const isExpanded = selectedTeam === team.teamNumber;
@@ -809,35 +932,65 @@ export default function AnalyticsScreen() {
             )}
 
             <Text style={styles.sectionLabel}>Recent Matches</Text>
-            {filteredMatches.slice(-3).reverse().map(match => (
-              <View key={match.id} style={styles.matchHistoryItem}>
-                <View style={styles.matchHistoryInfo}>
-                <Text style={styles.matchHistoryText}>
-                  Match {match.matchNumber}
-                </Text>
-                <Text style={styles.matchHistoryDate}>
-                  {new Date(match.timestamp).toLocaleDateString()}
-                </Text>
-                </View>
-                <View style={styles.matchHistoryActions}>
-                  <TouchableOpacity
-                    onPress={() => setSurveyMatchForModal(match)}
-                    style={styles.notesMatchButton}
-                  >
-                    <Ionicons name="document-text-outline" size={22} color="#ff6600" />
-                    <Text style={styles.notesMatchButtonText}>Notes</Text>
-                  </TouchableOpacity>
-                  {dataSource === 'local' && (
+            {filteredMatches.slice(-3).reverse().map(match => {
+              const scoutingNum = (match as CrossTeamMatch).scoutingTeamNumber;
+              const isMyMatch = scoutingNum === myTeamNumber;
+              return (
+                <View key={match.id} style={styles.matchHistoryItem}>
+                  <View style={styles.matchHistoryInfo}>
+                    <View style={styles.matchHistoryTopRow}>
+                      <Text style={styles.matchHistoryText}>Match {match.matchNumber}</Text>
+                      {showScoutingTeam && scoutingNum > 0 && (
+                        <View style={[styles.scoutedByBadge, isMyMatch && styles.scoutedByBadgeMine]}>
+                          <Text style={[styles.scoutedByText, isMyMatch && styles.scoutedByTextMine]}>
+                            {isMyMatch ? 'You' : `Team ${scoutingNum}`}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.matchHistoryDate}>
+                      {new Date(match.timestamp).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <View style={styles.matchHistoryActions}>
                     <TouchableOpacity
-                      onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
-                      style={styles.deleteMatchButton}
+                      onPress={() => setSurveyMatchForModal(match)}
+                      style={styles.notesMatchButton}
                     >
-                      <Ionicons name="close-circle" size={24} color="#ef4444" />
+                      <Ionicons name="document-text-outline" size={22} color="#ff6600" />
+                      <Text style={styles.notesMatchButtonText}>Notes</Text>
                     </TouchableOpacity>
-                  )}
+                    {dataSource === 'local' && (
+                      <TouchableOpacity
+                        onPress={() => handleDeleteMatch(match.id, match.matchNumber, team.teamNumber)}
+                        style={styles.deleteMatchButton}
+                      >
+                        <Ionicons name="close-circle" size={24} color="#ef4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
+
+            {/* Event summaries — shown in Team Lookup tab */}
+            {isLookupMode && (() => {
+              const summaries = getLookupEventSummaries(team);
+              if (summaries.length === 0) return null;
+              return (
+                <>
+                  <Text style={styles.sectionLabel}>Event Summaries</Text>
+                  {summaries.map(({ eventKey: ek, matchCount, avgPoints }) => (
+                    <View key={ek} style={styles.eventSummaryRow}>
+                      <Text style={styles.eventSummaryKey}>{ek}</Text>
+                      <Text style={styles.eventSummaryStats}>
+                        {matchCount} match{matchCount !== 1 ? 'es' : ''} · {avgPoints.toFixed(1)} avg pts
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              );
+            })()}
           </View>
         )}
 
@@ -895,7 +1048,10 @@ export default function AnalyticsScreen() {
       <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.segmentedControl}>
           <View style={[styles.segmentButton, styles.segmentButtonLeft, styles.segmentButtonActive]}>
-            <SkeletonBox width={70} height={16} style={{ borderRadius: 0, opacity: 1 }} />
+            <SkeletonBox width={60} height={16} style={{ borderRadius: 0, opacity: 1 }} />
+          </View>
+          <View style={[styles.segmentButton]}>
+            <SkeletonBox width={70} height={16} style={{ borderRadius: 0, opacity: 0.5 }} />
           </View>
           <View style={[styles.segmentButton, styles.segmentButtonRight]}>
             <SkeletonBox width={80} height={16} style={{ borderRadius: 0, opacity: 0.5 }} />
@@ -954,6 +1110,25 @@ export default function AnalyticsScreen() {
   if (dataSource === 'team' && !eventKey) {
     return (
       <SafeAreaView style={styles.container} edges={[]}>
+        {/* Segmented control still visible so user can switch tabs */}
+        <View style={styles.segmentedControl}>
+          {(['local', 'team', 'lookup'] as DataSource[]).map((src, i) => (
+            <TouchableOpacity
+              key={src}
+              style={[
+                styles.segmentButton,
+                i === 0 && styles.segmentButtonLeft,
+                i === 2 && styles.segmentButtonRight,
+                dataSource === src && styles.segmentButtonActive,
+              ]}
+              onPress={() => setDataSource(src)}
+            >
+              <Text style={[styles.segmentButtonText, dataSource === src && styles.segmentButtonTextActive]}>
+                {src === 'local' ? 'My Data' : src === 'team' ? 'Team Data' : 'Team Lookup'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <View style={styles.emptyState}>
           <Ionicons name="stats-chart-outline" size={64} color="#9ca3af" />
           <Text style={styles.emptyTitle}>No Event Selected</Text>
@@ -973,43 +1148,52 @@ export default function AnalyticsScreen() {
     <SafeAreaView style={styles.container} edges={[]}>
       {/* Segmented Control */}
       <View style={styles.segmentedControl}>
-        <TouchableOpacity
-          style={[
-            styles.segmentButton,
-            styles.segmentButtonLeft,
-            dataSource === 'local' && styles.segmentButtonActive,
-          ]}
-          onPress={() => setDataSource('local')}
-        >
-          <Text
+        {(['local', 'team', 'lookup'] as DataSource[]).map((src, i) => (
+          <TouchableOpacity
+            key={src}
             style={[
-              styles.segmentButtonText,
-              dataSource === 'local' && styles.segmentButtonTextActive,
+              styles.segmentButton,
+              i === 0 && styles.segmentButtonLeft,
+              i === 2 && styles.segmentButtonRight,
+              dataSource === src && styles.segmentButtonActive,
             ]}
+            onPress={() => setDataSource(src)}
           >
-            My Data
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.segmentButton,
-            styles.segmentButtonRight,
-            dataSource === 'team' && styles.segmentButtonActive,
-          ]}
-          onPress={() => setDataSource('team')}
-        >
-          <Text
-            style={[
-              styles.segmentButtonText,
-              dataSource === 'team' && styles.segmentButtonTextActive,
-            ]}
-          >
-            Team Data
-          </Text>
-        </TouchableOpacity>
+            <Text style={[styles.segmentButtonText, dataSource === src && styles.segmentButtonTextActive]}>
+              {src === 'local' ? 'My Data' : src === 'team' ? 'Team Data' : 'Team Lookup'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <ScrollView
+      {/* Scouter filter — only on Team Data when cross-team mode */}
+      {dataSource === 'team' && (
+        <View style={styles.scouterFilterRow}>
+          {(['my_team', 'all_teams'] as ScouterFilter[]).map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.scouterFilterBtn, scouterFilter === f && styles.scouterFilterBtnActive]}
+              onPress={() => setScouterFilter(f)}
+            >
+              <Text style={[styles.scouterFilterText, scouterFilter === f && styles.scouterFilterTextActive]}>
+                {f === 'my_team' ? 'My Team' : 'All Teams'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Team Lookup tab — fully self-contained to avoid full-screen re-renders */}
+      {dataSource === 'lookup' && (
+        <TeamLookupTab
+          eventKey={eventKey}
+          visibility={visibility}
+          myTeamNumber={myTeamNumber}
+          renderTeamCard={renderTeamCard}
+        />
+      )}
+
+      {dataSource !== 'lookup' && <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -1020,7 +1204,7 @@ export default function AnalyticsScreen() {
         <View style={styles.statsHeader}>
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>
-              {dataSource === 'local' ? matches.length : teamMatches.length}
+              {matches.length}
             </Text>
             <Text style={styles.statLabel}>Total Matches</Text>
           </View>
@@ -1061,7 +1245,7 @@ export default function AnalyticsScreen() {
         )}
 
         {/* Export Button - Only in Team Data, above cards */}
-        {dataSource === 'team' && teamMatches.length > 0 && (
+        {dataSource === 'team' && crossMatches.length > 0 && (
           <View style={styles.scanQrContainer}>
             <TouchableOpacity
               style={[styles.scanQrButton, isExporting && styles.syncButtonDisabled]}
@@ -1087,8 +1271,8 @@ export default function AnalyticsScreen() {
           renderEmptyState()
         ) : (
           <>
-            {/* Sort Controls */}
-            <View style={styles.sortControls}>
+            {/* Sort Controls — hidden in lookup to keep it simple */}
+            {dataSource !== 'lookup' && <View style={styles.sortControls}>
               <Text style={styles.sortLabel}>Sort by:</Text>
               <TouchableOpacity
                 style={[
@@ -1187,6 +1371,8 @@ export default function AnalyticsScreen() {
               </TouchableOpacity>
             </View>
 
+            }
+
             {/* Team Cards */}
             <View style={styles.teamList}>
               {getSortedTeams().map(team => renderTeamCard(team))}
@@ -1218,7 +1404,7 @@ export default function AnalyticsScreen() {
             )}
           </View>
         )}
-      </ScrollView>
+      </ScrollView>}
 
       {/* Survey Results Modal - backdrop fades in place, content slides up */}
       <Modal
@@ -1884,5 +2070,91 @@ const styles = {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600' as const,
+  },
+  // Scouter filter bar
+  scouterFilterRow: {
+    flexDirection: 'row' as const,
+    marginHorizontal: 16,
+    marginBottom: 6,
+    gap: 6,
+  },
+  scouterFilterBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#2a2a2a',
+    alignItems: 'center' as const,
+    borderWidth: 1,
+    borderColor: '#404040',
+  },
+  scouterFilterBtnActive: {
+    backgroundColor: '#ff6600',
+    borderColor: '#ff6600',
+  },
+  scouterFilterText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#888',
+  },
+  scouterFilterTextActive: {
+    color: '#fff',
+  },
+  // Team Lookup search
+  lookupInput: {
+    backgroundColor: '#2a2a2a',
+    color: '#fff',
+    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#404040',
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  // "Scouted by" badge on match rows
+  matchHistoryTopRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    flexWrap: 'wrap' as const,
+  },
+  scoutedByBadge: {
+    backgroundColor: '#333',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  scoutedByBadgeMine: {
+    backgroundColor: '#2a3a2a',
+    borderWidth: 1,
+    borderColor: '#4caf50',
+  },
+  scoutedByText: {
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '500' as const,
+  },
+  scoutedByTextMine: {
+    color: '#4caf50',
+  },
+  // Event summaries in Team Lookup
+  eventSummaryRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  eventSummaryKey: {
+    fontSize: 14,
+    color: '#e5e5e5',
+    fontWeight: '500' as const,
+    flex: 1,
+  },
+  eventSummaryStats: {
+    fontSize: 13,
+    color: '#b0b0b0',
   },
 };
