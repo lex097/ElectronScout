@@ -1076,7 +1076,7 @@ export default function MatchScoutScreen() {
                 }}
               >
                 <Text style={[styles.trackingModeBtnText, trackingMode === mode && styles.trackingModeBtnTextActive]}>
-                  {mode === 'rate' ? 'Rate' : 'Static'}
+                  {mode === 'rate' ? 'Rate' : 'Count'}
                 </Text>
               </TouchableOpacity>
             ))}
