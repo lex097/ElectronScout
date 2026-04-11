@@ -1128,13 +1128,6 @@ class BettingService {
         return [];
       }
 
-      // Don't resolve until the current user has scouted and submitted this match
-      const hasScouted = await this.hasCurrentUserScoutedMatch(matchResult);
-      if (!hasScouted) {
-        console.log(`[Betting] Match ${matchKey} not yet scouted by user. Waiting for submit before resolving.`);
-        return [];
-      }
-
       // Get all pending bets for this match
       const { data: bets, error } = await supabase
         .from('bets')
