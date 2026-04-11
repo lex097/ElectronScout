@@ -266,8 +266,9 @@ export const GAME_2026: GameConfig = {
   ],
   survey: [
     { id: "role", type: "multipleChoice", label: "Role", options: ["Scoring", "Passing", "Defense", "Immobile"]},
-    { id: "defense", type: "rating", label: "Defense Played" },
-    { id: "driving", type: "rating", label: "Driving ability" },
+    { id: "defense", type: "rating", label: "Defense Played by Team" },
+    {id: "defenseTaken", type: "rating", label: "Defense Taken by Opponents"},
+    { id: "driving", type: "rating", label: "Driving ability"},
     { id: "accuracy", type: "rating", label: "Shot Accuracy"},
     { id: "failures", type: "multipleChoice", label: "Failures?", options: ["Broke", "Immobile", "Disabled"]},
     { id: "notes", type: "text", label: "Notes" },
