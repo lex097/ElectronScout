@@ -96,14 +96,12 @@ export default function BettingModal({ visible, onClose, match, eventKey }: Bett
   }, [visible, eventKey, match.key]);
 
   const loadBettingData = async () => {
-    console.warn('[BettingModal] loadBettingData started, match.key:', match.key);
     setIsLoadingOdds(true);
     setMatchEndedBlock(null);
     setMatchScoutedBlock(null);
     try {
       // Always fetch match from TBA for logging; non-demo: block if match already ended
       const ended = await bettingService.isMatchEnded(match.key);
-      console.warn('[BettingModal] isMatchEnded result:', ended);
       if (!isDemoMode && ended) {
           setMatchEndedBlock('You cannot bet on a match that has already ended.');
           setHasFullOdds(false);

@@ -832,12 +832,6 @@ class BettingService {
       const redScore = match?.alliances?.red?.score;
       const blueScore = match?.alliances?.blue?.score;
       const winningAlliance = match?.winning_alliance;
-      console.warn('[TBA Match]', matchKey, JSON.stringify({
-        redScore,
-        blueScore,
-        winningAlliance,
-        alliances: match?.alliances ? { red: match.alliances.red, blue: match.alliances.blue } : undefined,
-      }));
       if (!match?.alliances) return false;
       // A match is ended if its score is >= 0, it is -1 if not yet played
       const hasScores = typeof redScore === 'number' && typeof blueScore === 'number' && redScore >= 0 && blueScore >= 0;
@@ -873,9 +867,9 @@ class BettingService {
           event_key: betData.eventKey,
           bet_type: betData.betType,
           bet_details: betData.betDetails,
-          bet_amount: betData.betAmount,
-          odds: betData.odds,
-          potential_payout: betData.potentialPayout,
+          bet_amount: Math.min(betData.betAmount, 99999999),
+          odds: Math.min(betData.odds, 99999999),
+          potential_payout: Math.min(betData.potentialPayout, 99999999),
           status: 'pending',
           is_demo_mode: isDemoMode,
         })
