@@ -36,10 +36,8 @@ statboticsClient.interceptors.response.use(
   },
   (error: AxiosError) => {
     if (error.response) {
-      // Server responded with error status
-      console.error(
-        `[Statbotics API] Error ${error.response.status}: ${error.response.statusText}`,
-        error.response.data
+      console.warn(
+        `[Statbotics API] Error ${error.response.status}: ${error.response.statusText}`
       );
     } else if (error.request) {
       // Request made but no response received (timeout, network error, etc.)
