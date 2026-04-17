@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repo.
 
 ## What This Is
 
-**ElectronScout** is an offline-first mobile scouting app for FIRST Robotics Competition (FRC), built with React Native / Expo. Teams use it to collect match data, analyze team statistics, manage picklists, and even bet on match outcomes with virtual currency (e-bucks).
+**ElectronScout** — offline-first mobile scouting app for FIRST Robotics Competition (FRC), built with React Native / Expo. Collect match data, analyze team stats, manage picklists, bet on match outcomes with virtual currency (e-bucks).
 
 ## Commands
 
@@ -27,7 +27,7 @@ eas build --platform ios
 eas build --platform android
 ```
 
-There are no lint or test commands configured.
+No lint or test commands configured.
 
 ## Environment Variables
 
@@ -44,16 +44,16 @@ Required in `.env`:
 - **Routing**: Expo Router (file-based, `app/` directory)
 - **State**: Zustand stores (`stores/`)
 - **Server state / caching**: React Query (`config/queryClient.ts`, `config/queryKeys.ts`)
-- **Local DB**: expo-sqlite — `frc_scout.db`, primary table `matches` with a `synced` flag
+- **Local DB**: expo-sqlite — `frc_scout.db`, primary table `matches` with `synced` flag
 - **Backend**: Supabase (PostgreSQL + RLS + Edge Functions)
 - **External APIs**: The Blue Alliance (`api/client.ts`) and Statbotics (`api/statboticsClient.ts`)
 - **Error tracking**: Sentry (initialized in `app/_layout.tsx`, Metro config in `metro.config.js`)
 
 ### Data Flow (Offline-First)
 
-1. Scouting data is written to local SQLite (`services/database.ts`) immediately.
-2. `services/supabase.sync.ts` orchestrates background sync — unsynchronized rows (where `synced = 0`) are transformed via `services/syncTransformer.ts` and batch-uploaded via the `batchInsertMatches` Supabase Edge Function.
-3. Remote data (team stats, bets, schedules) is fetched via React Query hooks and Supabase client.
+1. Scouting data written to local SQLite (`services/database.ts`) immediately.
+2. `services/supabase.sync.ts` orchestrates background sync — unsynced rows (`synced = 0`) transformed via `services/syncTransformer.ts`, batch-uploaded via `batchInsertMatches` Supabase Edge Function.
+3. Remote data (team stats, bets, schedules) fetched via React Query hooks and Supabase client.
 
 ### Key Directories
 
@@ -71,23 +71,23 @@ Required in `.env`:
 | `components/` | Shared UI components; `betting/` and `admin/` subdirectories |
 
 ### Authentication
-- Login is team-code based, validated via a Supabase Edge Function.
-- JWT access + refresh tokens are stored in AsyncStorage via `lib/authTokenProvider.ts`.
-- `stores/authStore.ts` handles token refresh; the app stays logged in when offline.
+- Login team-code based, validated via Supabase Edge Function.
+- JWT access + refresh tokens stored in AsyncStorage via `lib/authTokenProvider.ts`.
+- `stores/authStore.ts` handles token refresh; app stays logged in offline.
 
 ### Betting System
-- `services/bettingService.ts` computes dynamic odds using normal distribution over blended team statistics (EPA from Statbotics + locally scouted data).
-- `services/teamStatisticsService.ts` manages the EPA blend and standard deviation calculations.
+- `services/bettingService.ts` computes dynamic odds via normal distribution over blended team stats (EPA from Statbotics + locally scouted data).
+- `services/teamStatisticsService.ts` manages EPA blend and standard deviation calculations.
 
 ### Game Configuration (Annual Update)
-- `config/gameConfig.ts` is the single file that defines all match phases, metric types (counter, boolean, timer, rapid counter), and scoring for the current FRC game year.
-- The 2025 ("Reefscape") config is present but commented out; the 2026 ("Rebuilt") config is active.
-- When a new season starts: update `gameConfig.ts` and redeploy via EAS.
+- `config/gameConfig.ts` — single file defining all match phases, metric types (counter, boolean, timer, rapid counter), and scoring for current FRC game year.
+- 2025 ("Reefscape") config present but commented out; 2026 ("Rebuilt") config active.
+- New season: update `gameConfig.ts`, redeploy via EAS.
 
 ### Import Alias
-`@/*` maps to the project root (configured in `tsconfig.json`). Use `@/services/...`, `@/stores/...`, etc.
+`@/*` maps to project root (configured in `tsconfig.json`). Use `@/services/...`, `@/stores/...`, etc.
 
 ### Production Notes
-- `babel.config.js` strips all `console.log/info/debug` calls in production (keeps `error` and `warn`).
-- expo-sqlite is mocked to an empty module on web (see `metro.config.js`).
+- `babel.config.js` strips all `console.log/info/debug` in production (keeps `error` and `warn`).
+- expo-sqlite mocked to empty module on web (see `metro.config.js`).
 - OTA updates use Expo Updates; native builds use EAS.

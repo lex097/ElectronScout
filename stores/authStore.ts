@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import { setAuthTokenProvider } from '@/lib/authTokenProvider';
 import { edgeFunctions } from '@/lib/edgeFunctions';
 import { useAdminStore } from '@/stores/adminStore';
+import { supabaseSyncService } from '@/services/supabase.sync';
 
 const SCOUT_NAME_KEY = 'scout_name';
 const TEAM_NUMBER_KEY = 'team_number';
@@ -99,6 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       await AsyncStorage.setItem(TEAM_NUMBER_KEY, String(user.team_number));
       await AsyncStorage.setItem(TEAM_ID_KEY, user.team_id);
       await AsyncStorage.setItem(TEAM_CODE_KEY, teamCode);
+      supabaseSyncService.invalidateCache();
 
       set({
         user: {
@@ -116,6 +118,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         SCOUT_NAME_KEY, TEAM_NUMBER_KEY, TEAM_ID_KEY, TEAM_CODE_KEY,
         ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, TOKEN_EXPIRES_AT_KEY,
       ]);
+      supabaseSyncService.invalidateCache();
       useAdminStore.getState().lock();
       set({ user: null, isAuthenticated: false });
     },

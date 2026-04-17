@@ -246,7 +246,7 @@ Deno.serve(async (req) => {
           break;
         }
 
-        const { eventKey } = params;
+        const { eventKey, gameYear } = params;
         let query = supabase
           .from('matches')
           .select('*')
@@ -255,6 +255,10 @@ Deno.serve(async (req) => {
 
         if (eventKey) {
           query = query.eq('event_key', eventKey);
+        }
+
+        if (gameYear) {
+          query = query.eq('game_year', gameYear);
         }
 
         const [{ data, error }, { data: deletionsData }] = await Promise.all([

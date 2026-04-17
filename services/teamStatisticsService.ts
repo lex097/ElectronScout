@@ -958,7 +958,7 @@ class TeamStatisticsService {
   }
 
   /** TTL in ms - skip refresh if last refresh was within this window */
-  private static readonly REFRESH_TTL_MS = 30_000;
+  private static readonly REFRESH_TTL_MS = 300_000;
   private lastRefreshAt = 0;
 
   /**
@@ -982,6 +982,12 @@ class TeamStatisticsService {
       console.error('Error refreshing team statistics:', error);
       return false;
     }
+  }
+
+  /** Force refresh — bypasses TTL. Call after match submit so next bet open gets fresh stats. */
+  async forceRefreshTeamStatistics(): Promise<boolean> {
+    this.lastRefreshAt = 0;
+    return this.refreshTeamStatistics();
   }
 
   /**

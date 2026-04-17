@@ -55,12 +55,12 @@ export class SyncTransformer {
   }
 
   static validateMatch(match: any): boolean {
-    if (!match.id) return false;
-    if (!match.match_number || match.match_number < 1) return false;
-    if (!match.team_number || match.team_number < 1 || match.team_number > 99999) return false;
-    if (!match.game_year || match.game_year < 2000) return false;
-    if (!match.metrics || typeof match.metrics !== 'object') return false;
-    if (typeof match.calculated_points !== 'number' || match.calculated_points < 0) return false;
+    if (!match.id) { console.error('[Sync] Validation failed: missing id', match); return false; }
+    if (!match.match_number || match.match_number < 1) { console.error('[Sync] Validation failed: invalid match_number', match.match_number); return false; }
+    if (!match.team_number || match.team_number < 1 || match.team_number > 99999) { console.error('[Sync] Validation failed: invalid team_number', match.team_number); return false; }
+    if (!match.game_year || match.game_year < 2000) { console.error('[Sync] Validation failed: invalid game_year', match.game_year); return false; }
+    if (!match.metrics || typeof match.metrics !== 'object') { console.error('[Sync] Validation failed: invalid metrics type', typeof match.metrics); return false; }
+    if (typeof match.calculated_points !== 'number' || match.calculated_points < 0) { console.error('[Sync] Validation failed: invalid calculated_points', match.calculated_points); return false; }
     return true;
   }
 
@@ -145,7 +145,7 @@ export class SyncManager {
         // Refresh team_statistics view after successful upload
         try {
           const { teamStatisticsService } = await import('./teamStatisticsService');
-          await teamStatisticsService.refreshTeamStatistics();
+          await teamStatisticsService.forceRefreshTeamStatistics();
           console.log('✅ Refreshed team_statistics view after single match upload');
         } catch (refreshError) {
           console.error('Error refreshing team_statistics view:', refreshError);
@@ -243,7 +243,7 @@ export class SyncManager {
       if (successCount > 0) {
         try {
           const { teamStatisticsService } = await import('./teamStatisticsService');
-          await teamStatisticsService.refreshTeamStatistics();
+          await teamStatisticsService.forceRefreshTeamStatistics();
           console.log('✅ Refreshed team_statistics view after sync');
         } catch (refreshError) {
           console.error('Error refreshing team_statistics view:', refreshError);

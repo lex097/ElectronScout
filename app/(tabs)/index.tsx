@@ -71,6 +71,7 @@ export default function MatchScoutScreen() {
   const saveButtonContainerRef = useRef<View>(null);
   const saveButtonYRef = useRef<number>(0);
   const pendingMatchIdRef = useRef<string | null>(null);
+  const isSubmittingRef = useRef<boolean>(false);
   const insets = useSafeAreaInsets();
   const getScoutName = useAuthStore((state) => state.getScoutName);
   const earnEbucks = useEbucksStore((state) => state.earnEbucks);
@@ -693,9 +694,6 @@ export default function MatchScoutScreen() {
     };
     try {
       await db.saveMatch(matchDataWithoutSurvey);
-      syncManager.uploadMatch(matchDataWithoutSurvey).catch((e) =>
-        console.error('[Survey] Background upload failed:', e)
-      );
     } catch (e) {
       console.error('[End Match] Failed to save:', e);
       Alert.alert('Error', 'Failed to save match data.');
@@ -706,8 +704,13 @@ export default function MatchScoutScreen() {
 
   const handleSurveySubmit = useCallback(
     async (survey: Record<string, any>) => {
+      if (isSubmittingRef.current) return;
+      isSubmittingRef.current = true;
       const matchId = pendingMatchIdRef.current;
-      if (!matchId || !matchNumber?.trim() || !teamNumber?.trim()) return;
+      if (!matchId || !matchNumber?.trim() || !teamNumber?.trim()) {
+        isSubmittingRef.current = false;
+        return;
+      }
       setIsSaving(true);
       setShowSurveyModal(false);
       pendingMatchIdRef.current = null;
@@ -729,7 +732,6 @@ export default function MatchScoutScreen() {
           allianceColor: allianceColor || undefined,
         };
         await db.saveMatch(matchData);
-        await syncManager.uploadMatch(matchData);
         await earnEbucks(EARNED_PER_MATCH, `Scouted match ${matchNumber} for team ${teamNumber}`);
 
         // Optimistically update My Schedule cache so "Scouted" badge appears instantly
@@ -744,6 +746,23 @@ export default function MatchScoutScreen() {
             newSet.add(key);
             return { ...old, scoutedSet: newSet };
           });
+          const cached = queryClient.getQueryData<{ assignments: any[]; scoutedSet: Set<string> }>(qk);
+          if (cached) {
+            const nextUnscouted = cached.assignments
+              .filter(a => !cached.scoutedSet.has(`${a.match_number}:${a.team_number}`))
+              .sort((a, b) => a.match_number - b.match_number)
+              .slice(0, 3);
+            for (const assignment of nextUnscouted) {
+              bettingService.getMatchResult(assignment.match_key)
+                .then(matchResult => {
+                  if (!matchResult?.alliances) return;
+                  const redTeams = matchResult.alliances.red.team_keys.map((k: string) => parseInt(k.replace('frc', ''), 10));
+                  const blueTeams = matchResult.alliances.blue.team_keys.map((k: string) => parseInt(k.replace('frc', ''), 10));
+                  bettingService.preloadOdds(redTeams, blueTeams, eventKey, assignment.match_key);
+                })
+                .catch(() => {});
+            }
+          }
         }
         if (isTBAMode) {
           try {
@@ -795,6 +814,7 @@ export default function MatchScoutScreen() {
         Alert.alert('Error', `Failed to save match: ${errMsg.slice(0, 80)}`);
       } finally {
         setIsSaving(false);
+        isSubmittingRef.current = false;
       }
     },
     [

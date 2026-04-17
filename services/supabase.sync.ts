@@ -35,41 +35,46 @@ function mapCrossTeamRow(row: any): CrossTeamMatch {
 // ============================================
 
 export class SupabaseSyncService {
-  
+
   // 🧪 MOCK MODE: Set to true for testing without auth
   private MOCK_MODE = false; // Disabled to use real team data from AsyncStorage
   private MOCK_TEAM_NUMBER = 1234;
   private MOCK_SCOUT_NAME = 'Test Scout';
   private MOCK_TEAM_CODE = 'ABC123'; // Mock team code for testing
 
+  // In-memory cache — only changes on login/logout
+  private _teamNumber: number | null | undefined = undefined;
+  private _scoutName: string | null | undefined = undefined;
+  private _teamId: string | null | undefined = undefined;
+
+  invalidateCache(): void {
+    this._teamNumber = undefined;
+    this._scoutName = undefined;
+    this._teamId = undefined;
+  }
+
   /**
    * Get team number from AsyncStorage (or mock)
    */
   private async getTeamNumber(): Promise<number | null> {
-    if (this.MOCK_MODE) {
-      return this.MOCK_TEAM_NUMBER;
-    }
-    
+    if (this.MOCK_MODE) return this.MOCK_TEAM_NUMBER;
+    if (this._teamNumber !== undefined) return this._teamNumber;
     try {
       const teamNumberStr = await AsyncStorage.getItem('team_number');
-      if (!teamNumberStr) return null;
-      return parseInt(teamNumberStr, 10);
+      this._teamNumber = teamNumberStr ? parseInt(teamNumberStr, 10) : null;
+      return this._teamNumber;
     } catch (error) {
       console.error('Error getting team number:', error);
       return null;
     }
   }
 
-  /**
-   * Get scout name from AsyncStorage (or mock)
-   */
   private async getScoutName(): Promise<string | null> {
-    if (this.MOCK_MODE) {
-      return this.MOCK_SCOUT_NAME;
-    }
-    
+    if (this.MOCK_MODE) return this.MOCK_SCOUT_NAME;
+    if (this._scoutName !== undefined) return this._scoutName;
     try {
-      return await AsyncStorage.getItem('scout_name');
+      this._scoutName = await AsyncStorage.getItem('scout_name');
+      return this._scoutName;
     } catch (error) {
       console.error('Error getting scout name:', error);
       return null;
@@ -106,13 +111,11 @@ export class SupabaseSyncService {
    * Get current team's ID from auth store (set during login with team code)
    */
   async getTeamId(): Promise<string | null> {
-    if (this.MOCK_MODE) {
-      return await this.getTeamIdByNumber(this.MOCK_TEAM_NUMBER);
-    }
-
+    if (this.MOCK_MODE) return await this.getTeamIdByNumber(this.MOCK_TEAM_NUMBER);
+    if (this._teamId !== undefined) return this._teamId;
     try {
-      const teamId = await AsyncStorage.getItem('team_id');
-      return teamId;
+      this._teamId = await AsyncStorage.getItem('team_id');
+      return this._teamId;
     } catch (error) {
       console.error('Error getting team_id:', error);
       return null;
@@ -130,6 +133,8 @@ export class SupabaseSyncService {
     try {
       const teamNumber = await this.getTeamNumber();
       const scoutName = await this.getScoutName();
+      if (teamNumber === null) console.error('[Sync] Not authenticated: team_number missing from storage');
+      if (scoutName === null) console.error('[Sync] Not authenticated: scout_name missing from storage');
       return teamNumber !== null && scoutName !== null;
     } catch (error) {
       console.error('Error checking authentication:', error);
@@ -217,9 +222,12 @@ export class SupabaseSyncService {
       });
 
       const result = await edgeFunctions.batchInsertMatches(teamNumber, matches, scoutName);
+      if (result.failedIds.length > 0) {
+        console.error('[Sync] Batch insert partial failure:', result.failedIds.length, 'failed IDs:', result.failedIds);
+      }
       return result;
     } catch (error) {
-      console.error('Batch insert failed:', error);
+      console.error('[Sync] Batch insert failed, all', matches.length, 'matches unsynced. Error:', error);
       return { insertedIds: [], skippedDeletedIds: [], failedIds: matches.map(m => m.id) };
     }
   }
